@@ -621,14 +621,22 @@ class UserDistrict(core_models.VersionedModel):
             cache.set(f"user_districts_{user.id}", cachedata)
 
         if not districts and cachedata:
+            missing_location_ids = set()
             for d in cachedata:
                 location = cache.get(f"location_{d[1]}")
                 if not location:
-                    logger.error(f"district  {d[0]}:{d[1]} does not use a cached location")
+                    logger.warning(f"district  {d[0]}:{d[1]} does not use a cached location")
+                    missing_location_ids.add(d[1])
                 else:
                     if location.parent_id:
                         location.parent = cache.get(f"location_{location.parent_id}")
                     districts.append(UserDistrict(id=d[0], user=user, location=location))
+
+            if missing_location_ids:
+                missing_locs = Location.objects.filter(id__in=missing_location_ids)
+                for loc in missing_locs:
+                    cache.set(f"location_{loc.id}", loc, timeout=None)
+                    districts.append(UserDistrict(id=0, user=user, location=loc))
 
         return districts
 

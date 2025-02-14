@@ -9,7 +9,7 @@ from core.test_helpers import create_test_officer, create_test_interactive_user
 from claim.test_helpers import create_test_claim_admin
 from django.core.cache import caches
 
-from location.models import LocationManager, UserDistrict
+from location.models import LocationManager, UserDistrict, Location, cache, cache_location_if_not_cached
 from core.utils import filter_validity
 from core.models.user import Role
 
@@ -26,7 +26,6 @@ _TEST_DATA_USER = {
 }
 
 
-# Create your tests here.
 class LocationTest(TestCase):
     test_village = None
     test_user = None
@@ -41,6 +40,7 @@ class LocationTest(TestCase):
     def setUpTestData(cls):
         cls.test_village = create_test_village()
 
+        super_user_role = Role.objects.filter(is_system=64, *filter_validity()).first()
         ca_role = Role.objects.filter(is_system=16, *filter_validity()).first()
         eo_role = Role.objects.filter(is_system=1, *filter_validity()).first()
         xx_role = Role.objects.filter(is_system=2, *filter_validity()).first()
@@ -58,6 +58,9 @@ class LocationTest(TestCase):
         cls.test_user_eo = create_test_interactive_user(
             username="tst_eo",
             roles=[eo_role.id],
+        )
+        cls.test_super_user = create_test_interactive_user(
+            username="superuser", roles=[super_user_role.id]
         )
         cls.other_loc = create_test_location(
             "D",
@@ -231,3 +234,18 @@ class LocationTest(TestCase):
             ),
             "is_allowed function is not working as supposed",
         )
+
+    def test_get_user_districts_does_not_rely_on_cache_for_correctness(self):
+        all_valid_districts = Location.objects.filter(
+            type="D",
+            parent__isnull=False,
+            *filter_validity(),
+        )
+        self.assertTrue(all_valid_districts.count() > 0)
+
+        # populate cache & simulate cache eviction
+        cache_location_if_not_cached()
+        cache.delete(f"location_{all_valid_districts.first().id}")
+
+        user_districts = UserDistrict.get_user_districts(self.test_super_user)
+        self.assertEqual(len(user_districts), len(all_valid_districts))
