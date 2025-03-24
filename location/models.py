@@ -2,6 +2,7 @@ from django.core.cache import caches
 from django_redis.cache import RedisCache
 import uuid
 from core import filter_validity
+from core.models import CachedManager
 from django.conf import settings
 from django.db import models, connection
 from django.dispatch import receiver
@@ -35,7 +36,7 @@ def free_cache_post_user_save(sender, instance, **kwargs):
     free_cache_for_user(instance.id)
 
 
-class LocationManager(models.Manager):
+class LocationManager(CachedManager):
     def parents(self, location_id, loc_type=None):
         parents = Location.objects.raw(
             f"""
