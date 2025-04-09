@@ -382,7 +382,7 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
                     .officer_allowed_locations
                 )
             elif user.is_claim_admin:
-                from claim.models import ClaimAdmin
+                from core.models.user import ClaimAdmin
 
                 return (
                     ClaimAdmin.objects.filter(
