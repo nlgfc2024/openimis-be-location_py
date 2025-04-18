@@ -35,6 +35,7 @@ None
 ## Configuration options (can be changed via core.ModuleConfiguration)
 * gql_query_locations_perms: necessary rights to call locations (default:) )[],
 * gql_query_health_facilities_perms: necessary rights to call health_facilities and health_facilities_str (default:) [])
+* max_location_code_length: Define Max Location Code Length
 
 ## openIMIS Modules Dependencies
 * core.models.InteractiveUser

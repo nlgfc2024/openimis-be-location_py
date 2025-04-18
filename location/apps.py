@@ -29,6 +29,7 @@ DEFAULT_CFG = {
         },
     ],
     "health_facility_contract_dates_mandatory": False,
+    "max_location_code_length": 50,
 }
 
 
@@ -49,6 +50,7 @@ class LocationConfig(AppConfig):
 
     health_facility_level = []
     health_facility_contract_dates_mandatory = None
+    max_location_code_length = None
 
     def __load_config(self, cfg):
         for field in cfg:
