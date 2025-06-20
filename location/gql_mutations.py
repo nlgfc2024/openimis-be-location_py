@@ -13,26 +13,10 @@ import copy
 from .services import LocationService, HealthFacilityService
 
 
-class LocationCodeInputType(graphene.String):
-    @staticmethod
-    def coerce_string(value):
-        assert_string_length(value, 8)
-        return value
-
-    serialize = coerce_string
-    parse_value = coerce_string
-
-    @staticmethod
-    def parse_literal(ast):
-        result = graphene.String.parse_literal(ast)
-        assert_string_length(result, 8)
-        return result
-
-
 class LocationInputType(OpenIMISMutation.Input):
     id = graphene.Int(required=False, read_only=True)
     uuid = graphene.String(required=False)
-    code = LocationCodeInputType(required=True)
+    code = graphene.String(required=True)
     name = graphene.String(required=True)
     type = graphene.String(required=True)
     male_population = graphene.Int(required=False)
