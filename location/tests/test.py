@@ -5,8 +5,7 @@ from location.test_helpers import (
     create_test_location,
     assign_user_districts,
 )
-from core.test_helpers import create_test_officer, create_test_interactive_user
-from claim.test_helpers import create_test_claim_admin
+from core.test_helpers import create_test_officer, create_test_interactive_user, create_test_claim_admin
 from django.core.cache import caches
 
 from location.models import LocationManager, UserDistrict, Location, cache, cache_location_if_not_cached
@@ -241,11 +240,25 @@ class LocationTest(TestCase):
             parent__isnull=False,
             *filter_validity(),
         )
-        self.assertTrue(all_valid_districts.count() > 0)
+        self.assertTrue(all_valid_districts.exists())
 
-        # populate cache & simulate cache eviction
+        # Manually prime location cache
         cache_location_if_not_cached()
-        cache.delete(f"location_{all_valid_districts.first().id}")
 
+        # Simulate cache eviction of a location's parent
+        example_district = all_valid_districts.first()
+        self.assertIsNotNone(example_district.parent_id)
+        cache.delete(f"location_{example_district.parent_id}")
+
+        # Also ensure no UserDistricts are cached for the user
+        cache.delete(f"user_districts_{self.test_super_user.id}")
+
+        # Invoke the method, which should handle missing parent cache gracefully
         user_districts = UserDistrict.get_user_districts(self.test_super_user)
-        self.assertEqual(len(user_districts), len(all_valid_districts))
+
+        self.assertEqual(len(user_districts), all_valid_districts.count())
+
+        # Check that all districts have a parent loaded even if it had been evicted
+        for ud in user_districts:
+            self.assertIsNotNone(ud.location)
+            self.assertIsNotNone(ud.location.parent)

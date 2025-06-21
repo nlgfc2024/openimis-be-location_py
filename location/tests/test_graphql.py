@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass
 import uuid
 
+from core import filter_validity
 from core.models import User
 from core.test_helpers import create_test_interactive_user
 from django.conf import settings
@@ -223,6 +224,102 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
         self.assertGreater(len(content["data"]["locations"]["edges"]), 0)
         self.assertIsNotNone(content["data"]["locations"]["edges"][0]["node"]["id"])
         self.assertIsNotNone(content["data"]["locations"]["edges"][0]["node"]["name"])
+
+    def test_locations_str_query(self):
+        invalid_village = create_test_village({'name': 'Invalid Vilalge', 'code': 'IV2020'})
+        invalid_village.validity_to = '2020-02-20'
+        invalid_village.parent = self.test_village.parent
+        invalid_village.save()
+
+        invalid_villages_qs = Location.objects.filter(type='V', code=invalid_village.code, name=invalid_village.name)
+        self.assertEquals(invalid_villages_qs.count(), 1)
+        self.assertEquals(invalid_villages_qs.filter(*filter_validity()).count(), 0)
+
+        valid_villages_qs = Location.objects.filter(type='V', code=self.test_village.code, name=self.test_village.name)
+        self.assertEquals(valid_villages_qs.count(), 1)
+        self.assertEquals(valid_villages_qs.filter(*filter_validity()).count(), 1)
+
+        query_str = """{
+          locationsStr(
+            type: "V",
+            str: ""
+          ) {
+            pageInfo {
+              hasNextPage
+              hasPreviousPage
+              startCursor
+              endCursor
+            }
+            edges {
+              node {
+                id uuid code name type validityTo
+                parent {
+                  id uuid code name type
+                  parent {
+                    id uuid code name type
+                    parent {
+                      id uuid code name type
+                      parent {
+                        id uuid code name type
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }"""
+        response = self.query(
+            query_str,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
+        )
+
+        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        content = json.loads(response.content)
+        location_data = content["data"]["locationsStr"]
+
+        location_uuids = list(
+            e['node']['uuid'] for e in location_data['edges']
+        )
+        print(location_uuids)
+        self.assertTrue(
+            str(self.test_village.uuid) in location_uuids,
+            f'Expect {self.test_village.id} in {location_uuids}, but not found'
+        )
+        self.assertFalse(
+            str(invalid_village.id) in location_uuids,
+            f'Expect {invalid_village.id} not in {location_uuids}, but found'
+        )
+
+        # Check that the same works for non-admin users
+        non_admin_user = create_test_interactive_user(username="imnotadmin", roles=[1])
+        self.assertFalse(non_admin_user.is_superuser)
+        non_admin_user_token = get_token(non_admin_user, DummyContext(user=non_admin_user))
+        district_code = self.test_village.parent.parent.code
+        assign_user_districts(non_admin_user, [district_code])
+
+        response = self.query(
+            query_str,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {non_admin_user_token}"},
+        )
+
+        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        content = json.loads(response.content)
+        location_data = content["data"]["locationsStr"]
+        print(location_data)
+
+        location_uuids = list(
+            e['node']['uuid'] for e in location_data['edges']
+        )
+        print(location_uuids)
+        self.assertTrue(
+            str(self.test_village.uuid) in location_uuids,
+            f'Expect {self.test_village.id} in {location_uuids}, but not found'
+        )
+        self.assertFalse(
+            str(invalid_village.id) in location_uuids,
+            f'Expect {invalid_village.id} not in {location_uuids}, but found'
+        )
 
     def test_mutation_create_location(self):
         response = self.query(
@@ -584,6 +681,16 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
         content = json.loads(response.content)
         self.assertIsNotNone(content)
         self.assertResponseNoErrors(response)
+
+        districts = content["data"]["userDistricts"]
+        self.assertGreater(len(districts), 0)
+        parent = districts[0]["parent"]
+        self.assertIsNotNone(parent)
+
+        self.assertTrue(parent["id"].startswith("TG9jYXRpb25HUUxUeXBlOj"), parent["id"])  # encoded ID
+        self.assertIsInstance(parent["uuid"], str)
+        self.assertIsInstance(parent["code"], str)
+        self.assertIsInstance(parent["name"], str)
 
     def test_user_districts_not_admin(self):
 
