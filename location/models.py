@@ -29,6 +29,7 @@ def free_cache_for_user(user_id="*"):
         cache_name = f"user_districts_{user_id}"
         cache.delete(cache_name)
 
+
 @receiver(post_save, sender=core_models.InteractiveUser)
 @receiver(post_delete, sender=core_models.InteractiveUser)
 def free_cache_post_user_save(sender, instance, **kwargs):
@@ -230,7 +231,7 @@ class LocationManager(CachedManager):
 
     def is_allowed(self, user, locations_id, strict=True):
         if LocationConfig.no_location_check or user.is_superuser or not settings.ROW_SECURITY:
-            return True 
+            return True
         allowed = self.get_allowed_ids(user, strict)
         return all(
             [loc in extend_allowed_locations(allowed, strict) for loc in locations_id]
@@ -587,7 +588,7 @@ class UserDistrict(core_models.VersionedModel):
         if hasattr(user, "_u"):
             user = user._u
         cachestringkey = f"user_districts_{user.id}"
-        if LocationConfig.no_location_check :
+        if LocationConfig.no_location_check:
             cachestringkey = "user_districts_all"
         cachedata = cache.get(cachestringkey)
         districts = []
@@ -621,13 +622,13 @@ class UserDistrict(core_models.VersionedModel):
             cache.set(cachestringkey, cachedata)
         if not districts and cachedata:
             location_ids = [d[1] for d in cachedata]
-            locations = { l.id: l for l in Location.objects.filter(id__in=location_ids)}
+            locations = {loc.id: loc for loc in Location.objects.filter(id__in=location_ids)}
 
             parent_ids = {
                 loc.parent_id for loc in locations.values()
                 if loc and loc.parent_id
             }
-            parents = { l.id: l for l in Location.objects.filter(id__in=parent_ids)} 
+            parents = {loc.id: loc for loc in Location.objects.filter(id__in=parent_ids)}
 
             for district_id, loc_id in cachedata:
                 location = locations.get(loc_id)

@@ -1,10 +1,8 @@
 import base64
 import json
-from dataclasses import dataclass
 import uuid
 
 from core import filter_validity
-from core.models import User
 from core.test_helpers import create_test_interactive_user
 from django.conf import settings
 from django.core import exceptions
