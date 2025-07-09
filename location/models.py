@@ -205,7 +205,7 @@ class LocationManager(CachedManager):
         return list(qsr)
 
     def get_allowed_ids(self, user, strict=True):
-        if hasattr(user, "_u"):
+        if hasattr(user, '_u'):
             user = user._u
         cache_name = f"user_locations_{user.id}"
         allowed = cache.get(cache_name)
@@ -230,7 +230,7 @@ class LocationManager(CachedManager):
         return allowed
 
     def is_allowed(self, user, locations_id, strict=True):
-        if user.is_superuser or not settings.ROW_SECURITY:
+        if LocationConfig.no_location_check or user.is_superuser or not settings.ROW_SECURITY:
             return True
         allowed = self.get_allowed_ids(user, strict)
         return all(
@@ -587,13 +587,16 @@ class UserDistrict(core_models.VersionedModel):
         """
         if hasattr(user, "_u"):
             user = user._u
-        cachedata = cache.get(f"user_districts_{user.id}")
+        cachestringkey = f"user_districts_{user.id}"
+        if LocationConfig.no_location_check:
+            cachestringkey = "user_districts_all"
+        cachedata = cache.get(cachestringkey)
         districts = []
         if cachedata is None:
             cache_location_if_not_cached()
             cache_location_type = cache.get("location_types")
             cachedata = []
-            if user.is_superuser:
+            if user.is_superuser or LocationConfig.no_location_check:
                 for loc in cache_location_type['D']:
                     cachedata.append([0, loc])
             elif not isinstance(user, core_models.InteractiveUser):
@@ -616,18 +619,16 @@ class UserDistrict(core_models.VersionedModel):
                 )
             for d in districts:
                 cachedata.append([d.id, d.location_id])
-
-            cache.set(f"user_districts_{user.id}", cachedata)
-
+            cache.set(cachestringkey, cachedata)
         if not districts and cachedata:
             location_ids = [d[1] for d in cachedata]
-            locations = { l.id: l for l in Location.objects.filter(id__in=location_ids)}
+            locations = {loc.id: loc for loc in Location.objects.filter(id__in=location_ids)}
 
             parent_ids = {
                 loc.parent_id for loc in locations.values()
                 if loc and loc.parent_id
             }
-            parents = { l.id: l for l in Location.objects.filter(id__in=parent_ids)} 
+            parents = {loc.id: loc for loc in Location.objects.filter(id__in=parent_ids)}
 
             for district_id, loc_id in cachedata:
                 location = locations.get(loc_id)
