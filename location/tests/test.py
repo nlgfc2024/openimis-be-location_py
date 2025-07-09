@@ -3,14 +3,12 @@ from location.test_helpers import (
     create_test_village,
     create_test_health_facility,
     create_test_location,
-    assign_user_districts
+    assign_user_districts,
 )
-from core.test_helpers import create_test_officer, create_test_interactive_user
-from claim.test_helpers import create_test_claim_admin
-from django.core.cache import cache
+from core.test_helpers import create_test_officer, create_test_interactive_user, create_test_claim_admin
+from django.core.cache import caches
 
-from location.models import LocationManager
-from core.services import create_or_update_interactive_user, create_or_update_core_user, create_or_update_user_districts
+from location.models import LocationManager, UserDistrict, Location, cache, cache_location_if_not_cached
 from core.utils import filter_validity
 from core.models.user import Role
 
@@ -25,7 +23,8 @@ _TEST_DATA_USER = {
     "language": "en",
     "roles": [1, 5, 9],
 }
-# Create your tests here.
+
+
 class LocationTest(TestCase):
     test_village = None
     test_user = None
@@ -35,125 +34,233 @@ class LocationTest(TestCase):
     test_user_eo = None
     test_user_ca = None
     other_loc = None
-    
+
     @classmethod
     def setUpTestData(cls):
         cls.test_village = create_test_village()
-        
+
+        super_user_role = Role.objects.filter(is_system=64, *filter_validity()).first()
         ca_role = Role.objects.filter(is_system=16, *filter_validity()).first()
         eo_role = Role.objects.filter(is_system=1, *filter_validity()).first()
         xx_role = Role.objects.filter(is_system=2, *filter_validity()).first()
-        cls.test_user = create_test_interactive_user(username='loctest', roles=[xx_role.id] )
-        cls.test_hf = create_test_health_facility(location_id=cls.test_village.parent.parent_id)
-        cls.test_user_ca = create_test_interactive_user(
-            username="tst_ca", 
-            roles=[ca_role.id],
-            custom_props={'health_facility_id': cls.test_hf.id}
+        cls.test_user = create_test_interactive_user(
+            username="loctest", roles=[xx_role.id]
         )
-        cls.test_user_eo = create_test_interactive_user(username="tst_eo", roles=[eo_role.id],)
-        cls.other_loc = create_test_location('D', custom_props={'parent': cls.test_village.parent.parent.parent, 'code': 'NOTALLO'})
-        assign_user_districts(cls.test_user, [cls.test_village.parent.parent.code])
-        
-        cls.test_ca = create_test_claim_admin(custom_props={
-            'health_facility_id': cls.test_hf.id,
-            'code': cls.test_user_ca.username,
-            'has_login': True
-        })
-        cls.test_eo = create_test_officer(
-            villages=[cls.test_village],
+        cls.test_hf = create_test_health_facility(
+            location_id=cls.test_village.parent.parent_id
+        )
+        cls.test_user_ca = create_test_interactive_user(
+            username="tst_ca",
+            roles=[ca_role.id],
+            custom_props={"health_facility_id": cls.test_hf.id},
+        )
+        cls.test_user_eo = create_test_interactive_user(
+            username="tst_eo",
+            roles=[eo_role.id],
+        )
+        cls.test_super_user = create_test_interactive_user(
+            username="superuser", roles=[super_user_role.id]
+        )
+        cls.other_loc = create_test_location(
+            "D",
             custom_props={
-                'code': cls.test_user_eo.username,
-                'has_login': True
+                "parent": cls.test_village.parent.parent.parent,
+                "code": "NOTALLO",
+            },
+        )
+        assign_user_districts(cls.test_user, [cls.test_village.parent.parent.code])
+
+        cls.test_ca = create_test_claim_admin(
+            custom_props={
+                "health_facility_id": cls.test_hf.id,
+                "code": cls.test_user_ca.username,
+                "has_login": True,
             }
         )
-
+        cls.test_eo = create_test_officer(
+            villages=[cls.test_village],
+            custom_props={"code": cls.test_user_eo.username, "has_login": True},
+        )
 
     def test_parents(self):
         hierachy = LocationManager().parents(self.test_village.id)
         self.assertEqual(len(hierachy), 4)
-        district = LocationManager().parents(self.test_village.id, loc_type='D')
+        district = LocationManager().parents(self.test_village.id, loc_type="D")
         self.assertEqual(len(district), 1)
-        
+
     def test_children(self):
         hierachy = LocationManager().children(self.test_village.parent.parent.parent.id)
         self.assertEqual(len(hierachy), 5)
-        district = LocationManager().children(self.test_village.parent.parent.parent.id, loc_type='D')
+        district = LocationManager().children(
+            self.test_village.parent.parent.parent.id, loc_type="D"
+        )
         self.assertEqual(len(district), 2)
-        
+
     def test_allowed_location(self):
-        allowed = LocationManager().allowed(self.test_user._u.id, loc_types=['V', 'D', 'W'])
+        allowed = LocationManager().allowed(
+            self.test_user._u.id, loc_types=["V", "D", "W"]
+        )
         self.assertEqual(len(allowed), 3)
-        self.assertTrue(LocationManager().is_allowed(self.test_user, [self.test_village.parent.parent.id]), 'is_allowed function is not working as supposed')
-        
-        allowed = LocationManager().allowed(self.test_user._u.id, loc_types=['R', 'D', 'W'])
+        self.assertTrue(
+            LocationManager().is_allowed(
+                self.test_user, [self.test_village.parent.parent.id]
+            ),
+            "is_allowed function is not working as supposed",
+        )
+        # same but with cache
+        self.assertTrue(
+            LocationManager().is_allowed(
+                self.test_user, [self.test_village.parent.parent.id]
+            ),
+            "is_allowed function is not working as supposed",
+        )
+
+        allowed = LocationManager().allowed(
+            self.test_user._u.id, loc_types=["R", "D", "W"]
+        )
         self.assertEqual(len(allowed), 2)
-        self.assertFalse(LocationManager().is_allowed(self.test_user, [self.other_loc.id, self.test_village.parent.parent.id]), 'is_allowed function is not working as supposed')
-        cached = cache.get(f"user_locations_{self.test_user._u.id}")
+        self.assertFalse(
+            LocationManager().is_allowed(
+                self.test_user, [self.other_loc.id, self.test_village.parent.parent.id]
+            ),
+            "is_allowed function is not working as supposed",
+        )
+        cached = caches["location"].get(f"user_locations_{self.test_user._u.id}")
         self.assertIsNotNone(cached)
- 
+        districts = UserDistrict.get_user_districts(self.test_user)
+        self.assertIsNotNone(districts)
+
+    def test_allowed_location_excludes_invalid(self):
+        invalid_village = create_test_village({'name': 'Invalid Vilalge', 'code': 'IV2020'})
+        invalid_village.validity_to = '2020-02-20'
+        invalid_village.parent = self.test_village.parent
+        invalid_village.save()
+
+        allowed = LocationManager().allowed(
+            self.test_user._u.id, loc_types=["V"]
+        )
+        self.assertEqual(len(allowed), 1)
+        self.assertEqual(allowed.first().id, self.test_village.id)
+
+    def test_cache_invalidation(self):
+        LocationManager().is_allowed(self.test_user, [])
+        cached = caches["location"].get(f"user_locations_{self.test_user._u.id}")
+        self.assertIsNotNone(cached, "cache not found")
+        self.test_user._u.email = "test@opeimis.org"
+        self.test_user._u.save()
+        # test invalidation
+        cached = caches["location"].get(f"user_locations_{self.test_user._u.id}")
+        self.assertIsNone(cached, "cache not cleared")
+        LocationManager().is_allowed(self.test_user, [])
+        create_test_village()
+        cached = caches["location"].get(f"user_locations_{self.test_user._u.id}")
+        self.assertIsNone(cached, "cache not cleared")
+
     def test_allowed_location_eo(self):
         self.assertFalse(
             LocationManager().is_allowed(
                 self.test_user_eo,
-                [self.test_village.id, self.test_village.parent.parent_id]
-            ), 
-            'is_allowed function is not working as supposed'
+                [self.test_village.id, self.test_village.parent.parent_id],
+            ),
+            "is_allowed function is not working as supposed",
         )
         self.assertFalse(
             LocationManager().is_allowed(
                 self.test_user_eo,
-                [self.other_loc.id, self.test_village.id, self.test_village.parent.parent_id],
-                strict=False
-            ), 
-            'is_allowed function is not working as supposed'
+                [
+                    self.other_loc.id,
+                    self.test_village.id,
+                    self.test_village.parent.parent_id,
+                ],
+                strict=False,
+            ),
+            "is_allowed function is not working as supposed",
         )
         self.assertTrue(
             LocationManager().is_allowed(
                 self.test_user_eo,
                 [self.test_village.id, self.test_village.parent.parent_id],
-                strict=False
-            ), 
-            'is_allowed function is not working as supposed'
+                strict=False,
+            ),
+            "is_allowed function is not working as supposed",
         )
         self.assertTrue(
             LocationManager().is_allowed(
                 self.test_user_eo,
                 [self.test_village.id, self.test_village.parent.parent_id],
-                strict=False
-            ), 
-            'is_allowed function is not working as supposed'
+                strict=False,
+            ),
+            "is_allowed function is not working as supposed",
         )
 
-    
     def test_allowed_location_ca(self):
         self.assertFalse(
             LocationManager().is_allowed(
                 self.test_user_ca,
-                [self.test_village.parent.parent_id, self.test_village.parent.parent.parent_id]
-            ), 
-            'is_allowed function is not working as supposed'
+                [
+                    self.test_village.parent.parent_id,
+                    self.test_village.parent.parent.parent_id,
+                ],
+            ),
+            "is_allowed function is not working as supposed",
         )
         self.assertFalse(
             LocationManager().is_allowed(
                 self.test_user_ca,
-                [self.other_loc.id, self.test_village.parent.parent_id, self.test_village.parent.parent.parent_id],
-                strict=False
-            ), 
-            'is_allowed function is not working as supposed'
+                [
+                    self.other_loc.id,
+                    self.test_village.parent.parent_id,
+                    self.test_village.parent.parent.parent_id,
+                ],
+                strict=False,
+            ),
+            "is_allowed function is not working as supposed",
         )
         self.assertTrue(
             LocationManager().is_allowed(
                 self.test_user_ca,
-                [self.test_village.parent.parent_id, self.test_village.parent.parent.parent_id],
-                strict=False
-            ), 
-            'is_allowed function is not working as supposed'
+                [
+                    self.test_village.parent.parent_id,
+                    self.test_village.parent.parent.parent_id,
+                ],
+                strict=False,
+            ),
+            "is_allowed function is not working as supposed",
         )
         self.assertTrue(
             LocationManager().is_allowed(
-                self.test_user_ca,
-                [self.test_village.parent.parent_id]
-            ), 
-            'is_allowed function is not working as supposed'
+                self.test_user_ca, [self.test_village.parent.parent_id]
+            ),
+            "is_allowed function is not working as supposed",
         )
-        
+
+    def test_get_user_districts_does_not_rely_on_cache_for_correctness(self):
+        all_valid_districts = Location.objects.filter(
+            type="D",
+            parent__isnull=False,
+            *filter_validity(),
+        )
+        self.assertTrue(all_valid_districts.exists())
+
+        # Manually prime location cache
+        cache_location_if_not_cached()
+
+        # Simulate cache eviction of a location's parent
+        example_district = all_valid_districts.first()
+        self.assertIsNotNone(example_district.parent_id)
+
+        # Also ensure no UserDistricts are cached for the user
+        cache.delete(f"user_districts_{self.test_super_user.id}")
+
+        # Invoke the method, which should hfill the cache
+        user_districts = UserDistrict.get_user_districts(self.test_super_user)
+        self.assertEqual(len(user_districts), all_valid_districts.count())
+        caches['default'].delete(f"cs_Location_{example_district.parent_id}")
+        # Invoke the method, which should handle missing parent cache gracefully
+        user_districts = UserDistrict.get_user_districts(self.test_super_user)
+        self.assertEqual(len(user_districts), all_valid_districts.count())
+
+        # Check that all districts have a parent loaded even if it had been evicted
+        for ud in user_districts:
+            self.assertIsNotNone(ud.location)
+            self.assertIsNotNone(ud.location.parent)

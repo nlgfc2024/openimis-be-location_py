@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass
 import uuid
 
+from core import filter_validity
 from core.models import User
 from core.test_helpers import create_test_interactive_user
 from django.conf import settings
@@ -10,21 +11,22 @@ from django.core import exceptions
 from graphene_django.utils.testing import GraphQLTestCase
 from graphql_jwt.shortcuts import get_token
 from location.models import Location, HealthFacility, HealthFacilityLegalForm
-from location.test_helpers import create_test_health_facility, create_test_location, assign_user_districts,create_test_village
+from location.test_helpers import (
+    create_test_health_facility,
+    create_test_location,
+    assign_user_districts,
+    create_test_village,
+)
 from rest_framework import status
 
 
 # from openIMIS import schema
 
-
-@dataclass
-class DummyContext:
-    """ Just because we need a context to generate. """
-    user: User
+from core.models.openimis_graphql_test_case import openIMISGraphQLTestCase, BaseTestContext as DummyContext
 
 
-class LocationGQLTestCase(GraphQLTestCase):
-    GRAPHQL_URL = f'/{settings.SITE_ROOT()}graphql'
+class LocationGQLTestCase(openIMISGraphQLTestCase):
+    GRAPHQL_URL = f"/{settings.SITE_ROOT()}graphql"
     # This is required by some version of graphene but is never used. It should be set to the schema but the import
     # is shown as an error in the IDE, so leaving it as True.
     GRAPHQL_SCHEMA = True
@@ -34,26 +36,41 @@ class LocationGQLTestCase(GraphQLTestCase):
     test_village = None
     test_ward = None
     test_location_delete = None
+
     @classmethod
     def setUpTestData(cls):
         if cls.test_region is None:
-            cls.test_village  =create_test_village()
-            cls.test_ward =cls.test_village.parent
-            cls.test_region =cls.test_village.parent.parent.parent
+            cls.test_village = create_test_village()
+            cls.test_ward = cls.test_village.parent
+            cls.test_region = cls.test_village.parent.parent.parent
             cls.test_district = cls.test_village.parent.parent
-        cls.admin_user = create_test_interactive_user(username="testLocationAdmin", roles=[7])
+        cls.admin_user = create_test_interactive_user(
+            username="testLocationAdmin", roles=[7]
+        )
         cls.admin_token = get_token(cls.admin_user, DummyContext(user=cls.admin_user))
-        cls.noright_user = create_test_interactive_user(username="testLocationNoRight", roles=[1])
-        cls.noright_token = get_token(cls.noright_user, DummyContext(user=cls.noright_user))
+        cls.noright_user = create_test_interactive_user(
+            username="testLocationNoRight", roles=[1]
+        )
+        cls.noright_token = get_token(
+            cls.noright_user, DummyContext(user=cls.noright_user)
+        )
         cls.admin_dist_user = create_test_interactive_user(username="testLocationDist")
         assign_user_districts(cls.noright_user, ["R1D1", "R2D1", "R2D2"])
-        cls.admin_dist_token = get_token(cls.admin_dist_user, DummyContext(user=cls.admin_dist_user))
-        cls.test_location_delete = create_test_location('V', custom_props={"code": "TODEL", "name": "To delete",
-                                                                           "parent_id": cls.test_ward.id})
+        cls.admin_dist_token = get_token(
+            cls.admin_dist_user, DummyContext(user=cls.admin_dist_user)
+        )
+        cls.test_location_delete = create_test_location(
+            "V",
+            custom_props={
+                "code": "TODEL",
+                "name": "To delete",
+                "parent_id": cls.test_ward.id,
+            },
+        )
 
     def _getLocationFromAPI(self, code):
         response = self.query(
-            '''
+            """
             query {
                 locations(code:"%s") {
                     edges {
@@ -63,7 +80,8 @@ class LocationGQLTestCase(GraphQLTestCase):
                     }
                 }
             }
-            ''' % (code,),
+            """
+            % (code,),
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
@@ -75,7 +93,7 @@ class LocationGQLTestCase(GraphQLTestCase):
 
     def test_basic_locations_query(self):
         response = self.query(
-            '''
+            """
             query {
                 locations {
                     edges {
@@ -86,9 +104,9 @@ class LocationGQLTestCase(GraphQLTestCase):
                     }
                 }
             }
-            ''',
+            """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
-        )   
+        )
         self.assertEquals(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
@@ -102,7 +120,7 @@ class LocationGQLTestCase(GraphQLTestCase):
 
     def _test_arg_locations_query(self, arg, token=None):
         response = self.query(
-            '''
+            """
             query {
                 locations(%s) {
                     edges {
@@ -113,8 +131,11 @@ class LocationGQLTestCase(GraphQLTestCase):
                     }
                 }
             }
-            ''' % (arg,),
-            headers={"HTTP_AUTHORIZATION": f"Bearer {token if token else self.admin_token}"},
+            """
+            % (arg,),
+            headers={
+                "HTTP_AUTHORIZATION": f"Bearer {token if token else self.admin_token}"
+            },
         )
 
         self.assertEquals(response.status_code, status.HTTP_200_OK)
@@ -123,9 +144,16 @@ class LocationGQLTestCase(GraphQLTestCase):
         self.assertResponseNoErrors(response)
 
         self.assertEqual(len(content["data"]["locations"]["edges"]), 1)
-        self.assertEqual(content["data"]["locations"]["edges"][0]["node"]["name"], self.test_region.name)
-        self.assertEqual(content["data"]["locations"]["edges"][0]["node"]["id"],
-                         base64.b64encode(f"LocationGQLType:{self.test_region.id}".encode("utf8")).decode("ascii"))
+        self.assertEqual(
+            content["data"]["locations"]["edges"][0]["node"]["name"],
+            self.test_region.name,
+        )
+        self.assertEqual(
+            content["data"]["locations"]["edges"][0]["node"]["id"],
+            base64.b64encode(
+                f"LocationGQLType:{self.test_region.id}".encode("utf8")
+            ).decode("ascii"),
+        )
 
     def test_code_locations_query(self):
         self._test_arg_locations_query('code:"%s"' % self.test_region.code)
@@ -140,24 +168,28 @@ class LocationGQLTestCase(GraphQLTestCase):
         The adapted rule is that if the user is allowed to create locations, he should also see all of them.
         In this test, the self.test_region etc are not in the admin_dist_token ["R1D1", "R2D1", "R2D2"]
         """
-        self._test_arg_locations_query('code:"%s"' % self.test_region.code, token=self.admin_dist_token)
+        self._test_arg_locations_query(
+            'code:"%s"' % self.test_region.code, token=self.admin_dist_token
+        )
 
     def test_no_auth_locations_query(self):
-        """ Query without any auth token """
-        response = self.query(' query { locations { edges { node { id name } } } } ')
+        """Query without any auth token"""
+        response = self.query(" query { locations { edges { node { id name } } } } ")
 
         self.assertResponseHasErrors(response)
 
     def test_no_right_locations_query(self):
-        """ Query with a valid token but not the right to perform this operation, but Location are """
-        response = self.query(' query { locations { edges { node { id name } } } } ',
-                              headers={"HTTP_AUTHORIZATION": f"Bearer {self.noright_token}"})
+        """Query with a valid token but not the right to perform this operation, but Location are"""
+        response = self.query(
+            " query { locations { edges { node { id name } } } } ",
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.noright_token}"},
+        )
 
         self.assertResponseNoErrors(response)
 
     def test_full_locations_query(self):
         response = self.query(
-            '''
+            """
             query {
                 locations {
                     edges {
@@ -180,7 +212,7 @@ class LocationGQLTestCase(GraphQLTestCase):
                     }
                 }
             }
-            ''',
+            """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
@@ -193,9 +225,105 @@ class LocationGQLTestCase(GraphQLTestCase):
         self.assertIsNotNone(content["data"]["locations"]["edges"][0]["node"]["id"])
         self.assertIsNotNone(content["data"]["locations"]["edges"][0]["node"]["name"])
 
+    def test_locations_str_query(self):
+        invalid_village = create_test_village({'name': 'Invalid Vilalge', 'code': 'IV2020'})
+        invalid_village.validity_to = '2020-02-20'
+        invalid_village.parent = self.test_village.parent
+        invalid_village.save()
+
+        invalid_villages_qs = Location.objects.filter(type='V', code=invalid_village.code, name=invalid_village.name)
+        self.assertEquals(invalid_villages_qs.count(), 1)
+        self.assertEquals(invalid_villages_qs.filter(*filter_validity()).count(), 0)
+
+        valid_villages_qs = Location.objects.filter(type='V', code=self.test_village.code, name=self.test_village.name)
+        self.assertEquals(valid_villages_qs.count(), 1)
+        self.assertEquals(valid_villages_qs.filter(*filter_validity()).count(), 1)
+
+        query_str = """{
+          locationsStr(
+            type: "V",
+            str: ""
+          ) {
+            pageInfo {
+              hasNextPage
+              hasPreviousPage
+              startCursor
+              endCursor
+            }
+            edges {
+              node {
+                id uuid code name type validityTo
+                parent {
+                  id uuid code name type
+                  parent {
+                    id uuid code name type
+                    parent {
+                      id uuid code name type
+                      parent {
+                        id uuid code name type
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }"""
+        response = self.query(
+            query_str,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
+        )
+
+        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        content = json.loads(response.content)
+        location_data = content["data"]["locationsStr"]
+
+        location_uuids = list(
+            e['node']['uuid'] for e in location_data['edges']
+        )
+        print(location_uuids)
+        self.assertTrue(
+            str(self.test_village.uuid) in location_uuids,
+            f'Expect {self.test_village.id} in {location_uuids}, but not found'
+        )
+        self.assertFalse(
+            str(invalid_village.id) in location_uuids,
+            f'Expect {invalid_village.id} not in {location_uuids}, but found'
+        )
+
+        # Check that the same works for non-admin users
+        non_admin_user = create_test_interactive_user(username="imnotadmin", roles=[1])
+        self.assertFalse(non_admin_user.is_superuser)
+        non_admin_user_token = get_token(non_admin_user, DummyContext(user=non_admin_user))
+        district_code = self.test_village.parent.parent.code
+        assign_user_districts(non_admin_user, [district_code])
+
+        response = self.query(
+            query_str,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {non_admin_user_token}"},
+        )
+
+        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        content = json.loads(response.content)
+        location_data = content["data"]["locationsStr"]
+        print(location_data)
+
+        location_uuids = list(
+            e['node']['uuid'] for e in location_data['edges']
+        )
+        print(location_uuids)
+        self.assertTrue(
+            str(self.test_village.uuid) in location_uuids,
+            f'Expect {self.test_village.id} in {location_uuids}, but not found'
+        )
+        self.assertFalse(
+            str(invalid_village.id) in location_uuids,
+            f'Expect {invalid_village.id} not in {location_uuids}, but found'
+        )
+
     def test_mutation_create_location(self):
         response = self.query(
-            '''
+            """
             mutation {
               createLocation(input: {
                 clientMutationId:"tstlocgql1",
@@ -211,7 +339,7 @@ class LocationGQLTestCase(GraphQLTestCase):
                 clientMutationId
               }
             }
-            ''',
+            """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
@@ -220,7 +348,9 @@ class LocationGQLTestCase(GraphQLTestCase):
 
         self.assertResponseNoErrors(response)
 
-        self.assertEqual(content["data"]["createLocation"]["clientMutationId"], "tstlocgql1")
+        self.assertEqual(
+            content["data"]["createLocation"]["clientMutationId"], "tstlocgql1"
+        )
 
         db_location = Location.objects.get(code="tstrgx")
         self.assertIsNotNone(db_location)
@@ -237,7 +367,7 @@ class LocationGQLTestCase(GraphQLTestCase):
 
     def test_mutation_delete_location(self):
         response = self.query(
-            '''
+            """
             mutation {
               deleteLocation(input: {
                 uuid: "%s"
@@ -247,7 +377,8 @@ class LocationGQLTestCase(GraphQLTestCase):
                 clientMutationId
               }
             }
-            ''' % self.test_location_delete.uuid,
+            """
+            % self.test_location_delete.uuid,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
@@ -255,13 +386,16 @@ class LocationGQLTestCase(GraphQLTestCase):
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
-        self.assertEqual(content["data"]["deleteLocation"]["clientMutationId"], "testlocation5")
-        ## check the mutation answer
-        response = self.query('''
+        self.assertEqual(
+            content["data"]["deleteLocation"]["clientMutationId"], "testlocation5"
+        )
+        # check the mutation answer
+        response = self.query(
+            """
         {
         mutationLogs(clientMutationId: "testlocation5")
         {
-            
+
         pageInfo { hasNextPage, hasPreviousPage, startCursor, endCursor}
         edges
         {
@@ -272,10 +406,11 @@ class LocationGQLTestCase(GraphQLTestCase):
         }
         }
         }
-            ''',
-            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"})
+            """,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
+        )
         self.assertResponseNoErrors(response)
-        
+
         self.test_location_delete.refresh_from_db()
 
         self.assertIsNotNone(self.test_location_delete.validity_to)
@@ -284,7 +419,7 @@ class LocationGQLTestCase(GraphQLTestCase):
 
 
 class HealthFacilityGQLTestCase(GraphQLTestCase):
-    GRAPHQL_URL = f'/{settings.SITE_ROOT()}graphql'
+    GRAPHQL_URL = f"/{settings.SITE_ROOT()}graphql"
     # This is required by some version of graphene but is never used. It should be set to the schema but the import
     # is shown as an error in the IDE, so leaving it as True.
     GRAPHQL_SCHEMA = True
@@ -295,14 +430,20 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        
+
         cls.admin_user = create_test_interactive_user(username="testHFAdmin")
         cls.admin_token = get_token(cls.admin_user, DummyContext(user=cls.admin_user))
-        cls.noright_user = create_test_interactive_user(username="testHFNoRight", roles=[1])
-        cls.noright_token = get_token(cls.noright_user, DummyContext(user=cls.noright_user))
+        cls.noright_user = create_test_interactive_user(
+            username="testHFNoRight", roles=[1]
+        )
+        cls.noright_token = get_token(
+            cls.noright_user, DummyContext(user=cls.noright_user)
+        )
         cls.admin_dist_user = create_test_interactive_user(username="testHFDist")
         assign_user_districts(cls.noright_user, ["R1D1", "R2D1", "R2D2"])
-        cls.admin_dist_token = get_token(cls.admin_dist_user, DummyContext(user=cls.admin_dist_user))
+        cls.admin_dist_token = get_token(
+            cls.admin_dist_user, DummyContext(user=cls.admin_dist_user)
+        )
 
         if cls.test_region is None:
             cls.test_village = create_test_village()
@@ -312,8 +453,9 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
 
         # Create the test HF with the code - TEST-MDF
         if cls.test_hf is None:
-            cls.test_hf = create_test_health_facility("MDF", cls.test_district.id, valid=True)
-        
+            cls.test_hf = create_test_health_facility(
+                "MDF", cls.test_district.id, valid=True
+            )
 
     def _getHFFromAPI(self, code):
         """
@@ -331,7 +473,9 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
                 }}
             }}
         """
-        response = self.query(query, headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_dist_token}"})
+        response = self.query(
+            query, headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_dist_token}"}
+        )
 
         self.assertEquals(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
@@ -349,9 +493,11 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
         client_mutation_id = "tsthfgql1"
         code = "tsthfx"
         name = "Test HF X"
-        legal_form = HealthFacilityLegalForm.objects.filter(code='C').first()
+        legal_form = HealthFacilityLegalForm.objects.filter(code="C").first()
         level = "H"
-        location = Location.objects.filter(code='R1D1', validity_to__isnull=True).first()  # create_test_location('V')
+        location = Location.objects.filter(
+            code="R1D1", validity_to__isnull=True
+        ).first()  # create_test_location('V')
         care_type = "B"
         query = f"""
             mutation {{
@@ -370,18 +516,24 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
               }}
             }}
         """
-        response = self.query(query,
-                              headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
-                              )
+        response = self.query(
+            query,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
+        )
 
         self.assertEquals(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
 
-        self.assertEqual(content["data"]["createHealthFacility"]["clientMutationId"], client_mutation_id)
+        self.assertEqual(
+            content["data"]["createHealthFacility"]["clientMutationId"],
+            client_mutation_id,
+        )
 
-        db_hf = HealthFacility.objects.filter(code=code, validity_to__isnull=True).first()
+        db_hf = HealthFacility.objects.filter(
+            code=code, validity_to__isnull=True
+        ).first()
         self.assertIsNotNone(db_hf)
         self.assertEqual(db_hf.name, name)
         self.assertEqual(db_hf.code, code)
@@ -405,7 +557,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
         code = "tsthfx2"
         name = "Test HF X2"
         level = "D"
-        location = create_test_location('V')
+        location = create_test_location("V")
         care_type = "I"
         query = f"""
             mutation {{
@@ -422,9 +574,10 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
               }}
             }}
         """
-        response = self.query(query,
-                              headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
-                              )
+        response = self.query(
+            query,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
+        )
 
         self.assertEquals(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertResponseHasErrors(response)
@@ -441,9 +594,23 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
         client_mutation_label = "Update health facility MDF"
 
         query = f"""
-            mutation {{            
+            mutation {{
                 updateHealthFacility(
-                input: {{clientMutationId: "{client_mutation_id}", clientMutationLabel: "{client_mutation_label}", uuid: "{self.test_hf.uuid}", code: "{self.test_hf.code}", name: "{self.test_hf.name}", locationId: {self.test_hf.location.id}, level: "{self.test_hf.level}", legalFormId: "{self.test_hf.legal_form.code}", careType: "{self.test_hf.care_type}", accCode: "{self.test_hf.acc_code}", address: "{self.test_hf.address}", phone: "0123456789", status: "AC"}}
+                input: {{
+                    clientMutationId: "{client_mutation_id}",
+                    clientMutationLabel: "{client_mutation_label}",
+                    uuid: "{self.test_hf.uuid}",
+                    code: "{self.test_hf.code}",
+                    name: "{self.test_hf.name}",
+                    locationId: {self.test_hf.location.id},
+                    level: "{self.test_hf.level}",
+                    legalFormId: "{self.test_hf.legal_form.code}",
+                    careType: "{self.test_hf.care_type}",
+                    accCode: "{self.test_hf.acc_code}",
+                    address: "{self.test_hf.address}",
+                    phone: "0123456789",
+                    status: "AC"
+                    }}
             ) {{
                 clientMutationId
                 internalId
@@ -451,14 +618,17 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
             }}
 
             """
-        
-        response = self.query(query, headers= {"HTTP_AUTHORIZATION" : f"Bearer {self.admin_token}"},)
+
+        response = self.query(
+            query,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
+        )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        
+
     def test_basic_HF_query(self):
         response = self.query(
-            '''
+            """
             query{
               healthFacilities(first: 10)
               {
@@ -468,40 +638,35 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
                 {
                   node
                   {
-                    id,uuid,code,accCode,name,careType,phone,fax,email,level,legalForm{code},location{code,name, parent{code, name}},validityFrom,validityTo,clientMutationId
+                    id,
+                    uuid,
+                    code,
+                    accCode,
+                    name,
+                    careType,
+                    phone,
+                    fax,
+                    email,
+                    level,
+                    legalForm{code},
+                    location{code,name, parent{code, name}},
+                    validityFrom,validityTo,clientMutationId
                   }
                 }
               }
             }
-            ''',
+            """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
         self.assertEquals(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
-        self.assertResponseNoErrors(response)
-        
-    def test_user_districts_admin(self):
-        
-        response = self.query(
-            '''
-            query
-                {
-                userDistricts
-                {
-                    id,uuid,code,name,parent{id, uuid, code, name}
-                }
-                }
-            ''',
-            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
-        )
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
-        content = json.loads(response.content)
+        self.assertIsNotNone(content)
         self.assertResponseNoErrors(response)
 
-    def test_user_districts_not_admin(self):
-        
+    def test_user_districts_admin(self):
+
         response = self.query(
-            '''
+            """
             query
                 {
                 userDistricts
@@ -509,17 +674,48 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
                     id,uuid,code,name,parent{id, uuid, code, name}
                 }
                 }
-            ''',
+            """,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
+        )
+        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        content = json.loads(response.content)
+        self.assertIsNotNone(content)
+        self.assertResponseNoErrors(response)
+
+        districts = content["data"]["userDistricts"]
+        self.assertGreater(len(districts), 0)
+        parent = districts[0]["parent"]
+        self.assertIsNotNone(parent)
+
+        self.assertTrue(parent["id"].startswith("TG9jYXRpb25HUUxUeXBlOj"), parent["id"])  # encoded ID
+        self.assertIsInstance(parent["uuid"], str)
+        self.assertIsInstance(parent["code"], str)
+        self.assertIsInstance(parent["name"], str)
+
+    def test_user_districts_not_admin(self):
+
+        response = self.query(
+            """
+            query
+                {
+                userDistricts
+                {
+                    id,uuid,code,name,parent{id, uuid, code, name}
+                }
+                }
+            """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.noright_token}"},
         )
         self.assertEquals(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
+        self.assertIsNotNone(content)
+
         self.assertResponseNoErrors(response)
-        
+
     def test_location_not_admin(self):
-        
+
         response = self.query(
-            '''
+            """
         query
     {
       locations(
@@ -527,7 +723,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
     orderBy: "code"
   )
       {
-        
+
     pageInfo { hasNextPage, hasPreviousPage, startCursor, endCursor}
     edges
     {
@@ -538,9 +734,10 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
     }
       }
     }
-            ''',
+            """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.noright_token}"},
         )
         self.assertEquals(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
+        self.assertIsNotNone(content)
         self.assertResponseNoErrors(response)
