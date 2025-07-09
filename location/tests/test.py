@@ -248,14 +248,16 @@ class LocationTest(TestCase):
         # Simulate cache eviction of a location's parent
         example_district = all_valid_districts.first()
         self.assertIsNotNone(example_district.parent_id)
-        cache.delete(f"location_{example_district.parent_id}")
 
         # Also ensure no UserDistricts are cached for the user
         cache.delete(f"user_districts_{self.test_super_user.id}")
 
+        # Invoke the method, which should hfill the cache
+        user_districts = UserDistrict.get_user_districts(self.test_super_user)
+        self.assertEqual(len(user_districts), all_valid_districts.count())
+        caches['default'].delete(f"cs_Location_{example_district.parent_id}")
         # Invoke the method, which should handle missing parent cache gracefully
         user_districts = UserDistrict.get_user_districts(self.test_super_user)
-
         self.assertEqual(len(user_districts), all_valid_districts.count())
 
         # Check that all districts have a parent loaded even if it had been evicted

@@ -237,49 +237,6 @@ class LocationManager(CachedManager):
             [loc in extend_allowed_locations(allowed, strict) for loc in locations_id]
         )
 
-    def get_with_cache(self, ids, prefix="location_", timeout=None):
-        """
-        Fetch Location instances by IDs, using cache if available.
-        Falls back to DB and updates cache as needed.
-
-        :param ids: List or set of Location IDs
-        :param prefix: Cache key prefix (default: 'location_')
-        :param timeout: Optional cache timeout
-        :return: Dict of {id: Location instance}
-        """
-        if not ids:
-            return {}
-
-        ids = list(set(ids))  # ensure uniqueness and list type
-        keys = {id_: f"{prefix}{id_}" for id_ in ids}
-        cached = cache.get_many(keys.values())
-        reverse_map = {v: k for k, v in keys.items()}
-
-        result = {}
-        missing_ids = []
-
-        # Fill from cache
-        for k, loc in cached.items():
-            loc_id = reverse_map[k]
-            result[loc_id] = loc
-
-        # Track cache misses
-        for id_ in ids:
-            if id_ not in result:
-                missing_ids.append(id_)
-
-        # Fallback to DB
-        if missing_ids:
-            db_locs = self.filter(id__in=missing_ids)
-            to_cache = {}
-            for loc in db_locs:
-                result[loc.id] = loc
-                to_cache[f"{prefix}{loc.id}"] = loc
-            if to_cache:
-                cache.set_many(to_cache, timeout=timeout)
-
-        return result
-
 
 def cache_location_graph(location_id=None):
     """Cache the location graph as a dictionary of edges."""
@@ -290,8 +247,6 @@ def cache_location_graph(location_id=None):
     graph = {}
     location_types = {}
     for location in locations:
-        if not location_id or location_id == location.id:
-            cache.set(f"location_{location.id}", location, timeout=None)
         parent_id = location.parent_id if location.parent_id else "root"
         if parent_id not in graph:
             graph[parent_id] = set()
@@ -666,13 +621,13 @@ class UserDistrict(core_models.VersionedModel):
 
         if not districts and cachedata:
             location_ids = [d[1] for d in cachedata]
-            locations = Location.objects.get_with_cache(location_ids)
+            locations = { l.id: l for l in Location.objects.filter(id__in=location_ids)}
 
             parent_ids = {
                 loc.parent_id for loc in locations.values()
                 if loc and loc.parent_id
             }
-            parents = Location.objects.get_with_cache(parent_ids)
+            parents = { l.id: l for l in Location.objects.filter(id__in=parent_ids)} 
 
             for district_id, loc_id in cachedata:
                 location = locations.get(loc_id)
