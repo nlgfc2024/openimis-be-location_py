@@ -595,7 +595,7 @@ class UserDistrict(core_models.VersionedModel):
             cache_location_if_not_cached()
             cache_location_type = cache.get("location_types")
             cachedata = []
-            if user.is_superuser or LocationConfig.no_location_check::
+            if user.is_superuser or LocationConfig.no_location_check:
                 for loc in cache_location_type['D']:
                     cachedata.append([0, loc])
             elif not isinstance(user, core_models.InteractiveUser):
