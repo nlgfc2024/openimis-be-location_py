@@ -72,43 +72,72 @@ class LocationManager(CachedManager):
         return self.get_location_from_ids((parents), loc_type) if loc_type else parents
 
     def allowed(self, user_id, loc_types=["R", "D", "W", "V"], strict=True, qs=False):
-        strict_sql = """
-        AND (
-            SELECT COUNT(*) FROM USER_LOC  ul
-            WHERE ul."ParentLocationId" = parent."LocationId" ) =  (
-                SELECT COUNT(*) FROM "tblLocations" l
-                WHERE l."ParentLocationId" = parent."LocationId" AND l."ValidityTo" is Null
-            )
-        """
-        query = f"""
-            WITH {"" if settings.MSSQL else "RECURSIVE"} USER_LOC AS
-                (SELECT l."LocationId", l."ParentLocationId" FROM "tblUsersDistricts" ud
-                JOIN "tblLocations" l ON ud."LocationId" = l."LocationId"
-                WHERE ud."ValidityTo"  is Null AND "UserID" = %s ),
-             CTE_PARENTS AS (
-            SELECT
-                parent."LocationId",
-                parent."LocationType",
-                parent."ParentLocationId"
+        recursive_keyword = "" if settings.MSSQL else "RECURSIVE"
+        loc_type_list = "','".join(loc_types)
 
-            FROM
-                "tblLocations" parent
-            WHERE "LocationId" in (SELECT "LocationId" FROM USER_LOC)
-            OR (  parent."LocationId" in  (SELECT "ParentLocationId" FROM USER_LOC)
-                    {
-                        strict_sql if strict else ""})
-            UNION ALL
-            SELECT
-                child."LocationId",
-                child."LocationType",
-                child."ParentLocationId"
-            FROM
-                "tblLocations"  child
-                INNER JOIN CTE_PARENTS leaf
-                    ON child."ParentLocationId" = leaf."LocationId"
-            WHERE child."ValidityTo" is NULL
+        # Clause for strict mode: include parent only if all children are assigned
+        if strict:
+            parent_filter = """
+                SELECT parent."LocationId",
+                       parent."LocationType",
+                       parent."ParentLocationId"
+                FROM "tblLocations" parent
+                WHERE parent."LocationId" IN (
+                    SELECT "ParentLocationId" FROM USER_LOC
+                )
+                AND (
+                    SELECT COUNT(*) FROM USER_LOC ul
+                    WHERE ul."ParentLocationId" = parent."LocationId"
+                ) = (
+                    SELECT COUNT(*) FROM "tblLocations" l
+                    WHERE l."ParentLocationId" = parent."LocationId"
+                    AND l."ValidityTo" IS NULL
+                )
+            """
+        else:
+            # Include direct parents unconditionally (but don't recurse from them)
+            parent_filter = """
+                SELECT parent."LocationId",
+                       parent."LocationType",
+                       parent."ParentLocationId"
+                FROM "tblLocations" parent
+                WHERE parent."LocationId" IN (
+                    SELECT "ParentLocationId" FROM USER_LOC
+                )
+            """
+
+        query = f"""
+            WITH {recursive_keyword}
+            USER_LOC AS (
+                SELECT l."LocationId", l."ParentLocationId"
+                FROM "tblUsersDistricts" ud
+                JOIN "tblLocations" l ON ud."LocationId" = l."LocationId"
+                WHERE ud."ValidityTo" IS NULL AND "UserID" = %s
+            ),
+            PARENTS AS (
+                {parent_filter}
+            ),
+            CTE_RECURSE AS (
+                -- Start recursion from assigned locations only
+                SELECT l."LocationId", l."LocationType", l."ParentLocationId"
+                FROM "tblLocations" l
+                WHERE l."LocationId" IN (SELECT "LocationId" FROM USER_LOC)
+
+                UNION ALL
+
+                SELECT child."LocationId", child."LocationType", child."ParentLocationId"
+                FROM "tblLocations" child
+                JOIN CTE_RECURSE parent ON child."ParentLocationId" = parent."LocationId"
+                WHERE child."ValidityTo" IS NULL
+            ),
+            ALL_LOCATIONS AS (
+                SELECT * FROM CTE_RECURSE
+                UNION
+                SELECT * FROM PARENTS
             )
-            SELECT DISTINCT "LocationId" FROM CTE_PARENTS WHERE "LocationType" in ('{"','".join(loc_types)}')
+            SELECT DISTINCT "LocationId"
+            FROM ALL_LOCATIONS
+            WHERE "LocationType" IN ('{loc_type_list}')
         """
 
         if qs is not None:
@@ -122,7 +151,6 @@ class LocationManager(CachedManager):
                 location_allowed = Location.objects.filter(
                     id__in=RawSQL(query, (user_id,))
                 )
-
         else:
             location_allowed = Location.objects.raw(query, (user_id,))
 
@@ -392,7 +420,7 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
             elif user.is_superuser:
                 return Location.objects
             else:
-                return cls.objects.allowed(user.i_user_id, qs=True)
+                return cls.objects.allowed(user.i_user_id, qs=True, strict=False)
         return queryset
 
     @staticmethod

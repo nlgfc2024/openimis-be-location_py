@@ -96,11 +96,41 @@ class LocationTest(TestCase):
         )
         self.assertEqual(len(district), 2)
 
-    def test_allowed_location(self):
+    def test_allowed(self):
+        allowed_ids = LocationManager().allowed(
+            self.test_user._u.id, loc_types=["V", "D", "W"], qs=True
+        ).values_list('id', flat=True)
+        self.assertTrue(self.test_village.id in allowed_ids)
+        self.assertTrue(self.test_village.parent.id in allowed_ids)
+        self.assertTrue(self.test_village.parent.parent.id in allowed_ids)
+        self.assertEqual(len(allowed_ids), 3)
+
+        allowed_ids = LocationManager().allowed(
+            self.test_user._u.id, loc_types=["R", "D", "W"], qs=True
+        ).values_list('id', flat=True)
+        self.assertTrue(self.test_village.parent.id in allowed_ids)
+        self.assertTrue(self.test_village.parent.parent.id in allowed_ids)
+        self.assertEqual(len(allowed_ids), 2)
+
+        # non-queryset
         allowed = LocationManager().allowed(
-            self.test_user._u.id, loc_types=["V", "D", "W"]
+            self.test_user._u.id, loc_types=["R", "D", "W"]
         )
-        self.assertEqual(len(allowed), 3)
+        self.assertEqual(len(allowed), 2)
+        allowed_ids_non_qs = list(l.id for l in allowed)
+        self.assertEqual(sorted(allowed_ids_non_qs), sorted(allowed_ids))
+
+        # Not strict should include parent, but not sibling
+        allowed_ids = LocationManager().allowed(
+            self.test_user._u.id, loc_types=["R", "D", "W"], qs=True, strict=False
+        ).values_list('id', flat=True)
+        self.assertTrue(self.test_village.parent.id in allowed_ids)
+        self.assertTrue(self.test_village.parent.parent.id in allowed_ids)
+        self.assertTrue(self.test_village.parent.parent.parent.id in allowed_ids)
+        self.assertFalse(self.other_loc.id in allowed_ids)
+        self.assertEqual(len(allowed_ids), 3)
+
+    def test_is_allowed(self):
         self.assertTrue(
             LocationManager().is_allowed(
                 self.test_user, [self.test_village.parent.parent.id]
@@ -115,10 +145,6 @@ class LocationTest(TestCase):
             "is_allowed function is not working as supposed",
         )
 
-        allowed = LocationManager().allowed(
-            self.test_user._u.id, loc_types=["R", "D", "W"]
-        )
-        self.assertEqual(len(allowed), 2)
         self.assertFalse(
             LocationManager().is_allowed(
                 self.test_user, [self.other_loc.id, self.test_village.parent.parent.id]
