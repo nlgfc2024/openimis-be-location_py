@@ -61,6 +61,7 @@ def _extract_mssql_views():
             else:
                 raise RuntimeError(f'{view} not found using query {query}')
 
+
 def _drop_mssql_views():
     with connection.cursor() as cursor:
         for view in DEPENDENT_VIEWS:
