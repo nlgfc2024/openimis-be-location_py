@@ -3,7 +3,13 @@ import json
 import uuid
 
 from core import filter_validity
-from core.test_helpers import create_test_interactive_user
+from core.test_helpers import (
+    create_test_interactive_user,
+    create_imis_admin_role,
+    create_claim_admin_role,
+    create_enrolment_officer_role,
+    create_manager_role,
+)
 from django.conf import settings
 from django.core import exceptions
 from graphene_django.utils.testing import GraphQLTestCase
@@ -14,6 +20,7 @@ from location.test_helpers import (
     create_test_location,
     assign_user_districts,
     create_test_village,
+    create_basic_test_locations,
 )
 from rest_framework import status
 
@@ -42,12 +49,15 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             cls.test_ward = cls.test_village.parent
             cls.test_region = cls.test_village.parent.parent.parent
             cls.test_district = cls.test_village.parent.parent
+        create_basic_test_locations()
+        admin_role = create_imis_admin_role()
         cls.admin_user = create_test_interactive_user(
-            username="testLocationAdmin", roles=[7]
+            username="testLocationAdmin", roles=[admin_role.id]
         )
         cls.admin_token = get_token(cls.admin_user, DummyContext(user=cls.admin_user))
+        manager_role = create_enrolment_officer_role()
         cls.noright_user = create_test_interactive_user(
-            username="testLocationNoRight", roles=[1]
+            username="testLocationNoRight", roles=[manager_role.id]
         )
         cls.noright_token = get_token(
             cls.noright_user, DummyContext(user=cls.noright_user)
@@ -290,7 +300,8 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
         )
 
         # Check that the same works for non-admin users
-        non_admin_user = create_test_interactive_user(username="imnotadmin", roles=[1])
+        manager_role = create_enrolment_officer_role()
+        non_admin_user = create_test_interactive_user(username="imnotadmin", roles=[manager_role.id])
         self.assertFalse(non_admin_user.is_superuser)
         non_admin_user_token = get_token(non_admin_user, DummyContext(user=non_admin_user))
         district_code = self.test_village.parent.parent.code
@@ -429,15 +440,18 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
     def setUpClass(cls):
         super().setUpClass()
 
-        cls.admin_user = create_test_interactive_user(username="testHFAdmin")
+        admin_role = create_imis_admin_role()
+        cls.admin_user = create_test_interactive_user(username="testHFAdmin", roles=[admin_role.id])
         cls.admin_token = get_token(cls.admin_user, DummyContext(user=cls.admin_user))
+        manager_role = create_enrolment_officer_role()
         cls.noright_user = create_test_interactive_user(
-            username="testHFNoRight", roles=[1]
+            username="testHFNoRight", roles=[manager_role.id]
         )
         cls.noright_token = get_token(
             cls.noright_user, DummyContext(user=cls.noright_user)
         )
         cls.admin_dist_user = create_test_interactive_user(username="testHFDist")
+        create_basic_test_locations()
         assign_user_districts(cls.noright_user, ["R1D1", "R2D1", "R2D2"])
         cls.admin_dist_token = get_token(
             cls.admin_dist_user, DummyContext(user=cls.admin_dist_user)

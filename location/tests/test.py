@@ -5,7 +5,15 @@ from location.test_helpers import (
     create_test_location,
     assign_user_districts,
 )
-from core.test_helpers import create_test_officer, create_test_interactive_user, create_test_claim_admin
+from core.test_helpers import (
+    create_test_officer,
+    create_test_interactive_user,
+    create_test_claim_admin,
+    create_manager_role,
+    create_imis_admin_role,
+    create_enrolment_officer_role,
+    create_claim_admin_role,
+)
 from django.core.cache import caches
 
 from location.models import LocationManager, UserDistrict, Location, cache, cache_location_if_not_cached
@@ -39,10 +47,10 @@ class LocationTest(TestCase):
     def setUpTestData(cls):
         cls.test_village = create_test_village()
 
-        super_user_role = Role.objects.filter(is_system=64, *filter_validity()).first()
-        ca_role = Role.objects.filter(is_system=16, *filter_validity()).first()
-        eo_role = Role.objects.filter(is_system=1, *filter_validity()).first()
-        xx_role = Role.objects.filter(is_system=2, *filter_validity()).first()
+        super_user_role = create_imis_admin_role()
+        ca_role = create_claim_admin_role()
+        eo_role = create_enrolment_officer_role()
+        xx_role = create_manager_role()
         cls.test_user = create_test_interactive_user(
             username="loctest", roles=[xx_role.id]
         )
