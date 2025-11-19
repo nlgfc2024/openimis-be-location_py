@@ -117,7 +117,7 @@ class LocationTest(TestCase):
             self.test_user._u.id, loc_types=["R", "D", "W"]
         )
         self.assertEqual(len(allowed), 2)
-        allowed_ids_non_qs = list(l.id for l in allowed)
+        allowed_ids_non_qs = list(loc.id for loc in allowed)
         self.assertEqual(sorted(allowed_ids_non_qs), sorted(allowed_ids))
 
         # Not strict should include parent, but not sibling

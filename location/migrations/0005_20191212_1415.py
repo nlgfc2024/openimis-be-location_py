@@ -12,7 +12,10 @@ class Migration(migrations.Migration):
         ("location", "0004_locationmutation"),
     ]
     replaces = [
-        ('location', "0005_healthfacilitycatchment_healthfacilitylegalform_healthfacilitymutation_healthfacilitysublevel")
+        (
+            'location',
+            "0005_healthfacilitycatchment_healthfacilitylegalform_healthfacilitymutation_healthfacilitysublevel"
+        )
     ]
 
     operations = [

@@ -55,19 +55,19 @@ def create_test_village(custom_props=None):
     if custom_props is None:
         custom_props = {}
 
-    code = custom_props.get("code")
+    code = custom_props.get("code", generate_random_string())
     if code:
         location = Location.objects.filter(code=code, validity_to__isnull=True).first()
         if location:
             return location
 
-    name = custom_props.get("name", "Test Village")
+    name = custom_props.get("name", "Test Village " + code)
     custom_props["name"] = name
     test_region = create_test_location(
         "R",
         custom_props={
             "name": "Region " + name,
-            "code": f"R-{generate_random_string()}",
+            "code": f"R-{code}",
         },
     )
     test_district = create_test_location(
@@ -75,7 +75,7 @@ def create_test_village(custom_props=None):
         custom_props={
             "parent": test_region,
             "name": "District " + name,
-            "code": f"D-{generate_random_string()}",
+            "code": f"D-{code}",
         },
     )
     test_ward = create_test_location(
@@ -83,7 +83,7 @@ def create_test_village(custom_props=None):
         custom_props={
             "parent": test_district,
             "name": "Ward " + name,
-            "code": f"W-{generate_random_string()}",
+            "code": f"W-{code}",
         },
     )
     custom_props["parent"] = test_ward
