@@ -6,9 +6,7 @@ from core import filter_validity
 from core.test_helpers import (
     create_test_interactive_user,
     create_imis_admin_role,
-    create_claim_admin_role,
     create_enrolment_officer_role,
-    create_manager_role,
 )
 from django.conf import settings
 from django.core import exceptions
