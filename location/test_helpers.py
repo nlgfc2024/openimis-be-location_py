@@ -92,6 +92,12 @@ def create_test_village(custom_props=None):
 
     return test_village
 
+def create_test_basic_health_facility_legal_form():
+    create_test_health_facility_legal_form(code="C", legal_form="Charity", sort_order=1)
+    create_test_health_facility_legal_form(code="D", legal_form="District organization", sort_order=2)
+    create_test_health_facility_legal_form(code="P", legal_form="Private organization", sort_order=3)
+    create_test_health_facility_legal_form(code="G", legal_form="Government", sort_order=4)
+
 
 def create_test_health_facility_legal_form(code="C", legal_form="Company", sort_order=1):
     """Create a test health facility legal form if it doesn't exist."""
@@ -103,6 +109,12 @@ def create_test_health_facility_legal_form(code="C", legal_form="Company", sort_
         }
     )
     return obj
+
+
+def create_test_basic_health_facility_sub_level():
+    create_test_health_facility_sub_level(code="D", health_facility_sub_level="Dispensary", sort_order=1)
+    create_test_health_facility_sub_level(code="H", health_facility_sub_level="Hospital", sort_order=2)
+    create_test_health_facility_sub_level(code="C", health_facility_sub_level="Health Centre", sort_order=3)
 
 
 def create_test_health_facility_sub_level(code="S", health_facility_sub_level="Standard", sort_order=1):
