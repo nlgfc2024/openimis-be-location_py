@@ -123,14 +123,14 @@ class Query(graphene.ObjectType):
     def resolve_locations_all(self, info, **kwargs):
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
-        return Location.objects.filter(*filter_validity()).all()
+        return Location.objects.filter(*Location.filter_validity()).all()
 
     def resolve_locations_str(self, info, **kwargs):
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
 
         queryset = Location.get_queryset(None, info.context.user)
-        filters = [*filter_validity(**kwargs)]
+        filters = [*Location.filter_validity(**kwargs)]
 
         str = kwargs.get("str")
         if str is not None:
@@ -141,7 +141,7 @@ class Query(graphene.ObjectType):
     def resolve_health_facilities_str(self, info, **kwargs):
         if not info.context.user.is_authenticated:
             raise PermissionDenied(_("unauthorized"))
-        filters = [*filter_validity(**kwargs)]
+        filters = [*HealthFacility.filter_validity(**kwargs)]
         search = kwargs.get("str")
         district_uuid = kwargs.get("district_uuid")
         district_uuids = kwargs.get("districts_uuids")

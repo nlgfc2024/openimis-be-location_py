@@ -272,7 +272,7 @@ class LocationTest(TestCase):
         all_valid_districts = Location.objects.filter(
             type="D",
             parent__isnull=False,
-            *filter_validity(),
+            *Location.filter_validity(),
         )
         self.assertTrue(all_valid_districts.exists())
 

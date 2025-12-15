@@ -47,6 +47,9 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             cls.test_ward = cls.test_village.parent
             cls.test_region = cls.test_village.parent.parent.parent
             cls.test_district = cls.test_village.parent.parent
+        cls.test_region.name = "LocTestRegion"
+        cls.test_region.code = "LTR"
+        cls.test_region.save()
         create_basic_test_locations()
         admin_role = create_imis_admin_role()
         cls.admin_user = create_test_interactive_user(
@@ -133,6 +136,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
                         node {
                             id
                             name
+                            code
                         }
                     }
                 }
@@ -164,7 +168,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
     def test_code_locations_query(self):
         self._test_arg_locations_query('code:"%s"' % self.test_region.code)
         self._test_arg_locations_query('name:"%s"' % self.test_region.name)
-        self._test_arg_locations_query('name_Icontains:"Test ", type:"R"')
+        self._test_arg_locations_query('name_Icontains:"LocTest ", type:"R"')
 
     def test_code_locations_district_limited_query(self):
         """
@@ -239,11 +243,11 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
 
         invalid_villages_qs = Location.objects.filter(type='V', code=invalid_village.code, name=invalid_village.name)
         self.assertEquals(invalid_villages_qs.count(), 1)
-        self.assertEquals(invalid_villages_qs.filter(*filter_validity()).count(), 0)
+        self.assertEquals(invalid_villages_qs.filter(*Location.filter_validity()).count(), 0)
 
         valid_villages_qs = Location.objects.filter(type='V', code=self.test_village.code, name=self.test_village.name)
         self.assertEquals(valid_villages_qs.count(), 1)
-        self.assertEquals(valid_villages_qs.filter(*filter_validity()).count(), 1)
+        self.assertEquals(valid_villages_qs.filter(*Location.filter_validity()).count(), 1)
 
         query_str = """{
           locationsStr(

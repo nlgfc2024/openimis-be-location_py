@@ -133,7 +133,7 @@ class DeleteLocationMutation(OpenIMISMutation):
             if np_uuid:
                 new_parent = Location.objects.get(uuid=np_uuid)
                 Location.objects.filter(parent=location).filter(
-                    *filter_validity()
+                    *Location.filter_validity()
                 ).update(parent=new_parent)
             else:
                 tree_delete((location,), now)
@@ -171,7 +171,7 @@ def tree_reset_types(parent, location, new_level):
         location.type = LocationConfig.location_types[-1]
         return
     location.type = LocationConfig.location_types[new_level]
-    for child in location.children.filter(*filter_validity()).all():
+    for child in location.children.filter(*Location.filter_validity()).all():
         child.save_history()
         tree_reset_types(location, child, new_level + 1)
         child.save()
