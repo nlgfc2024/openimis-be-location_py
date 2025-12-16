@@ -1,7 +1,6 @@
 from django.core.cache import caches
 from django_redis.cache import RedisCache
 import uuid
-from core import filter_validity
 from core.models import CachedManager
 from django.conf import settings
 from django.db import models, connection

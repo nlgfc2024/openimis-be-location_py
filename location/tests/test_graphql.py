@@ -2,7 +2,6 @@ import base64
 import json
 import uuid
 
-from core import filter_validity
 from core.test_helpers import (
     create_test_interactive_user,
     create_imis_admin_role,

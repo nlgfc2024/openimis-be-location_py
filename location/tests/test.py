@@ -17,7 +17,6 @@ from core.test_helpers import (
 from django.core.cache import caches
 
 from location.models import LocationManager, UserDistrict, Location, cache, cache_location_if_not_cached
-from core.utils import filter_validity
 
 
 _TEST_USER_NAME = "test_batch_run"

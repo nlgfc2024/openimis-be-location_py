@@ -32,7 +32,6 @@ from location.services import LocationService, HealthFacilityService
 from location.apps import LocationConfig
 import graphene
 from django.db.models import Q
-from core.utils import filter_validity
 from core import models as core_models
 from django.conf import settings
 

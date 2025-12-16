@@ -1,6 +1,6 @@
 import graphene
 from .apps import LocationConfig
-from core import assert_string_length, filter_validity
+from core import assert_string_length
 from core.schema import OpenIMISMutation
 from .models import Location, HealthFacility, UserDistrict
 from django.contrib.auth.models import AnonymousUser

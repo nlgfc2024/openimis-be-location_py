@@ -92,6 +92,7 @@ def create_test_village(custom_props=None):
 
     return test_village
 
+
 def create_test_basic_health_facility_legal_form():
     create_test_health_facility_legal_form(code="C", legal_form="Charity", sort_order=1)
     create_test_health_facility_legal_form(code="D", legal_form="District organization", sort_order=2)
