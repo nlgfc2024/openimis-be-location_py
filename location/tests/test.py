@@ -13,6 +13,7 @@ from core.test_helpers import (
     create_imis_admin_role,
     create_enrolment_officer_role,
     create_claim_admin_role,
+    create_admin_role
 )
 from django.core.cache import caches
 
@@ -28,7 +29,7 @@ _TEST_DATA_USER = {
     "other_names": _TEST_USER_NAME,
     "user_types": "INTERACTIVE",
     "language": "en",
-    "roles": [1, 5, 9],
+    "roles": [create_admin_role().id],
 }
 
 
