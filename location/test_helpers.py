@@ -476,6 +476,7 @@ def create_basic_test_locations():
 
         location, created = Location.objects.get_or_create(
             code=data["code"],
+            validity_to=None,
             defaults={
                 "name": data["name"],
                 "type": data["type"],
