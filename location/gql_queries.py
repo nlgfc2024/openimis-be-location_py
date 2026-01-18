@@ -34,7 +34,7 @@ class LocationGQLType(DjangoObjectType):
         interfaces = (graphene.relay.Node,)
         filter_fields = {
             "id": ["exact"],
-            "uuid": ["exact"],
+            "uuid": ["exact", "in"],
             "code": ["exact", "istartswith", "icontains", "iexact", "ne"],
             "name": ["exact", "istartswith", "icontains", "iexact", "ne"],
             "type": ["exact"],
