@@ -1,7 +1,6 @@
 from django.core.cache import caches
 from django_redis.cache import RedisCache
 import uuid
-from core import filter_validity
 from core.models import CachedManager
 from django.conf import settings
 from django.db import models, connection
@@ -245,9 +244,9 @@ class LocationManager(CachedManager):
                 allowed = list(
                     OfficerVillage.objects.filter(
                         officer=core_models.Officer.objects.filter(
-                            code=user.login_name, *filter_validity()
+                            code=user.login_name, *core_models.Officer.filter_validity()
                         ).first(),
-                        *filter_validity(),
+                        *OfficerVillage.filter_validity(),
                     ).values_list("location_id", flat=True)
                 )
             else:
@@ -270,7 +269,7 @@ def cache_location_graph(location_id=None):
     """Cache the location graph as a dictionary of edges."""
     locations = Location.objects.filter(
         Q(parent__isnull=False) | Q(type='R'),
-        *filter_validity(),
+        *Location.filter_validity(),
     )
     graph = {}
     location_types = {}
@@ -639,8 +638,8 @@ class UserDistrict(core_models.VersionedModel):
                         user=user,
                         location__type="D",
                         location__parent__isnull=False,
-                        *filter_validity(),
-                        *filter_validity(prefix="location__"),
+                        *UserDistrict.filter_validity(),
+                        *Location.filter_validity(prefix="location__"),
                     )
                     .order_by("location__parent__code")
                     .order_by("location__code")
@@ -679,7 +678,7 @@ class UserDistrict(core_models.VersionedModel):
         if not core_models.InteractiveUser.is_interactive_user(user):
             return Location.objects.none()
         return (
-            Location.objects.filter(*filter_validity())
+            Location.objects.filter(*Location.filter_validity())
             .filter(parent__parent__userdistrict__user=user.i_user)
             .order_by("code")
         )
