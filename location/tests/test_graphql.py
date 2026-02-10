@@ -331,6 +331,55 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             f'Expect {invalid_village.id} not in {location_uuids}, but found'
         )
 
+    def test_locations_str_query_uuid_in(self):
+        """Test locationsStr query with uuid_In parameter to fetch specific locations by UUIDs"""
+        region_uuid = str(self.test_region.uuid)
+        district_uuid = str(self.test_district.uuid)
+        village_uuid = str(self.test_village.uuid)
+
+        query_str = """{
+          locationsStr(uuid_In: ["%s", "%s", "%s"]) {
+            pageInfo {
+              hasNextPage
+              hasPreviousPage
+            }
+            edges {
+              node {
+                id
+                uuid
+                code
+                name
+                type
+                parent {
+                  id
+                  uuid
+                  code
+                  name
+                  type
+                }
+              }
+            }
+          }
+        }""" % (region_uuid, district_uuid, village_uuid)
+
+        response = self.query(
+            query_str,
+            headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
+        )
+
+        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        content = json.loads(response.content)
+
+        self.assertResponseNoErrors(response)
+
+        location_data = content["data"]["locationsStr"]
+        returned_uuids = [e['node']['uuid'] for e in location_data['edges']]
+
+        self.assertEqual(len(returned_uuids), 3)
+        self.assertIn(region_uuid, returned_uuids)
+        self.assertIn(district_uuid, returned_uuids)
+        self.assertIn(village_uuid, returned_uuids)
+
     def test_mutation_create_location(self):
         response = self.query(
             """
