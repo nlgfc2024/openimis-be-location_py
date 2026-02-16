@@ -93,7 +93,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
@@ -115,7 +115,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         # This validates the status code and if you get errors
@@ -147,7 +147,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             },
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
@@ -225,7 +225,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
@@ -241,12 +241,12 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
         invalid_village.save()
 
         invalid_villages_qs = Location.objects.filter(type='V', code=invalid_village.code, name=invalid_village.name)
-        self.assertEquals(invalid_villages_qs.count(), 1)
-        self.assertEquals(invalid_villages_qs.filter(*Location.filter_validity()).count(), 0)
+        self.assertEqual(invalid_villages_qs.count(), 1)
+        self.assertEqual(invalid_villages_qs.filter(*Location.filter_validity()).count(), 0)
 
         valid_villages_qs = Location.objects.filter(type='V', code=self.test_village.code, name=self.test_village.name)
-        self.assertEquals(valid_villages_qs.count(), 1)
-        self.assertEquals(valid_villages_qs.filter(*Location.filter_validity()).count(), 1)
+        self.assertEqual(valid_villages_qs.count(), 1)
+        self.assertEqual(valid_villages_qs.filter(*Location.filter_validity()).count(), 1)
 
         query_str = """{
           locationsStr(
@@ -283,7 +283,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
         location_data = content["data"]["locationsStr"]
 
@@ -313,7 +313,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {non_admin_user_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
         location_data = content["data"]["locationsStr"]
         print(location_data)
@@ -367,7 +367,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
@@ -402,7 +402,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
@@ -441,7 +441,7 @@ class LocationGQLTestCase(openIMISGraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
@@ -539,7 +539,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
             query, headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_dist_token}"}
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
@@ -583,7 +583,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
 
         self.assertResponseNoErrors(response)
@@ -641,7 +641,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
 
-        self.assertEquals(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertResponseHasErrors(response)
 
         with self.assertRaises(exceptions.ObjectDoesNotExist):
@@ -720,7 +720,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
             """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
         self.assertIsNotNone(content)
         self.assertResponseNoErrors(response)
@@ -739,7 +739,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
             """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.admin_token}"},
         )
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
         self.assertIsNotNone(content)
         self.assertResponseNoErrors(response)
@@ -768,7 +768,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
             """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.noright_token}"},
         )
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
         self.assertIsNotNone(content)
 
@@ -799,7 +799,7 @@ class HealthFacilityGQLTestCase(GraphQLTestCase):
             """,
             headers={"HTTP_AUTHORIZATION": f"Bearer {self.noright_token}"},
         )
-        self.assertEquals(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
         content = json.loads(response.content)
         self.assertIsNotNone(content)
         self.assertResponseNoErrors(response)
