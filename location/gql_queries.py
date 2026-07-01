@@ -14,6 +14,9 @@ from location.models import (
     HealthFacility,
     UserDistrict,
     OfficerVillage,
+    MicroCatchment,
+    MicroCatchmentTA,
+    MicroCatchmentGVH,
 )
 from django.db.models import Field
 
@@ -188,3 +191,52 @@ class OfficerVillageGQLType(DjangoObjectType):
         return OfficerVillage.get_queryset(queryset, info).filter(
             validity_to__isnull=True
         )
+
+
+class MicroCatchmentTAGQLType(DjangoObjectType):
+    class Meta:
+        model = MicroCatchmentTA
+        filter_fields = {
+            "id": ["exact"],
+            "micro_catchment": ["exact"],
+            "location": ["exact"],
+        }
+
+
+class MicroCatchmentGVHGQLType(DjangoObjectType):
+    class Meta:
+        model = MicroCatchmentGVH
+        filter_fields = {
+            "id": ["exact"],
+            "micro_catchment": ["exact"],
+            "location": ["exact"],
+        }
+
+
+class MicroCatchmentGQLType(DjangoObjectType):
+    client_mutation_id = graphene.String()
+
+    class Meta:
+        model = MicroCatchment
+        interfaces = (graphene.relay.Node,)
+        filter_fields = {
+            "id": ["exact"],
+            "uuid": ["exact", "in"],
+            "code": ["exact", "istartswith", "icontains", "iexact"],
+            "name": ["exact", "istartswith", "icontains", "iexact"],
+            "type": ["exact"],
+            "date_from": ["exact", "lte", "gte"],
+            "date_to": ["exact", "lte", "gte"],
+            "district__uuid": ["exact"],
+            "traditional_authorities__location__uuid": ["exact"],
+        }
+        connection_class = ExtendedConnection
+
+    def resolve_client_mutation_id(self, info):
+        if not info.context.user.is_authenticated:
+            raise PermissionDenied(_("unauthorized"))
+        return None
+
+    @classmethod
+    def get_queryset(cls, queryset, info):
+        return MicroCatchment.get_queryset(queryset, info.context.user)

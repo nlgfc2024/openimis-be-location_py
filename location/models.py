@@ -744,6 +744,86 @@ class OfficerVillage(core_models.VersionedModel):
         return queryset
 
 
+class MicroCatchment(core_models.VersionedModel):
+    id = models.AutoField(db_column="MicroCatchmentId", primary_key=True)
+    uuid = models.CharField(db_column="MicroCatchmentUUID", max_length=36, default=uuid.uuid4, unique=True)
+    code = models.CharField(db_column="Code", max_length=50)
+    name = models.CharField(db_column="Name", max_length=255)
+    type = models.CharField(db_column="Type", max_length=50, null=True, blank=True)
+    district = models.ForeignKey(
+        Location,
+        models.DO_NOTHING,
+        db_column="DistrictId",
+        null=True,
+        blank=True,
+        related_name="micro_catchments",
+        limit_choices_to={"type": "D"},
+    )
+    date_from = models.DateField(db_column="DateFrom", null=True, blank=True)
+    date_to = models.DateField(db_column="DateTo", null=True, blank=True)
+    max_beneficiaries = models.IntegerField(db_column="MaxBeneficiaries", null=True, blank=True)
+    audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    class Meta:
+        managed = True
+        db_table = "tblMicroCatchments"
+
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        queryset = queryset if queryset is not None else cls.objects
+        if isinstance(user, ResolveInfo):
+            user = user.context.user
+        if settings.ROW_SECURITY and user.is_anonymous:
+            return queryset.filter(id=-1)
+        if settings.ROW_SECURITY:
+            pass
+        return queryset
+
+
+class MicroCatchmentTA(core_models.VersionedModel):
+    """Link table for Micro Catchment to Traditional Authority (Location type W)"""
+    id = models.AutoField(db_column="MicroCatchmentTAId", primary_key=True)
+    micro_catchment = models.ForeignKey(
+        MicroCatchment,
+        models.CASCADE,
+        db_column="MicroCatchmentId",
+        related_name="traditional_authorities",
+    )
+    location = models.ForeignKey(
+        Location,
+        models.CASCADE,
+        db_column="LocationId",
+        related_name="micro_catchments_ta",
+    )
+    audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    class Meta:
+        managed = True
+        db_table = "tblMicroCatchmentTA"
+
+
+class MicroCatchmentGVH(core_models.VersionedModel):
+    """Link table for Micro Catchment to GVH (Group Village Headman)"""
+    id = models.AutoField(db_column="MicroCatchmentGVHId", primary_key=True)
+    micro_catchment = models.ForeignKey(
+        MicroCatchment,
+        models.CASCADE,
+        db_column="MicroCatchmentId",
+        related_name="gvhs",
+    )
+    location = models.ForeignKey(
+        Location,
+        models.CASCADE,
+        db_column="LocationId",
+        related_name="micro_catchments_gvh",
+    )
+    audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    class Meta:
+        managed = True
+        db_table = "tblMicroCatchmentGVH"
+
+
 class LocationMutation(core_models.UUIDModel):
     location = models.ForeignKey(Location, models.DO_NOTHING, related_name="mutations")
     mutation = models.ForeignKey(

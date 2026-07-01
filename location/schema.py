@@ -13,12 +13,16 @@ from location.gql_mutations import (
     CreateLocationMutation,
     UpdateLocationMutation,
     DeleteLocationMutation,
-    MoveLocationMutation
+    MoveLocationMutation,
+    CreateMicroCatchmentMutation,
+    UpdateMicroCatchmentMutation,
+    DeleteMicroCatchmentMutation,
 )
 from location.gql_queries import (
     UserDistrictGQLType,
     LocationGQLType,
     HealthFacilityGQLType,
+    MicroCatchmentGQLType,
 )
 from location.models import (
     HealthFacility,
@@ -27,6 +31,7 @@ from location.models import (
     UserDistrict,
     LocationMutation,
     HealthFacilityMutation,
+    MicroCatchment,
 )
 from location.services import LocationService, HealthFacilityService
 from location.apps import LocationConfig
@@ -77,6 +82,11 @@ class Query(graphene.ObjectType):
         graphene.Boolean,
         health_facility_code=graphene.String(required=True),
         description="Checks that the specified health facility code is unique.",
+    )
+    micro_catchments = OrderedDjangoFilterConnectionField(
+        MicroCatchmentGQLType,
+        showHistory=graphene.Boolean(),
+        orderBy=graphene.List(of_type=graphene.String),
     )
 
     def resolve_health_facilities(self, info, **kwargs):
@@ -182,6 +192,17 @@ class Query(graphene.ObjectType):
         current_officer = Officer.objects.get(
             code=kwargs["officer_code"], validity_to__isnull=True
         )
+
+    def resolve_micro_catchments(self, info, **kwargs):
+        show_history = kwargs.get("showHistory", False)
+        if info.context.user.is_anonymous:
+            raise PermissionDenied(_("unauthorized"))
+        
+        query = MicroCatchment.get_queryset(None, info.context.user)
+        if not show_history:
+            query = query.filter(validity_to__isnull=True)
+        
+        return gql_optimizer.query(query.all(), info)
         if "location_type" in kwargs:
             return current_officer.officer_allowed_locations.filter(
                 type=kwargs["location_type"]
@@ -197,6 +218,9 @@ class Mutation(graphene.ObjectType):
     create_health_facility = CreateHealthFacilityMutation.Field()
     update_health_facility = UpdateHealthFacilityMutation.Field()
     delete_health_facility = DeleteHealthFacilityMutation.Field()
+    create_micro_catchment = CreateMicroCatchmentMutation.Field()
+    update_micro_catchment = UpdateMicroCatchmentMutation.Field()
+    delete_micro_catchment = DeleteMicroCatchmentMutation.Field()
 
 
 def on_location_mutation(sender, **kwargs):

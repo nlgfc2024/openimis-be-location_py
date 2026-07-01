@@ -2,7 +2,7 @@ import graphene
 from .apps import LocationConfig
 from core import assert_string_length
 from core.schema import OpenIMISMutation
-from .models import Location, HealthFacility, UserDistrict
+from .models import Location, HealthFacility, UserDistrict, MicroCatchment
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils.translation import gettext as _
@@ -10,7 +10,7 @@ from graphene import InputObjectType
 
 import copy
 
-from .services import LocationService, HealthFacilityService
+from .services import LocationService, HealthFacilityService, MicroCatchmentService
 
 
 class LocationInputType(OpenIMISMutation.Input):
@@ -372,6 +372,131 @@ class DeleteHealthFacilityMutation(OpenIMISMutation):
                 {
                     "message": _("location.mutation.failed_to_delete_health_facility")
                     % {"code": data["code"]},
+                    "detail": str(exc),
+                }
+            ]
+
+
+class MicroCatchmentInputType(OpenIMISMutation.Input):
+    id = graphene.Int(required=False, read_only=True)
+    uuid = graphene.String(required=False)
+    code = graphene.String(required=True)
+    name = graphene.String(required=True)
+    type = graphene.String(required=False)
+    district_id = graphene.Int(required=False)
+    date_from = graphene.Date(required=False)
+    date_to = graphene.Date(required=False)
+    ta_ids = graphene.List(graphene.Int, required=False)
+    gvh_ids = graphene.List(graphene.Int, required=False)
+
+
+def update_or_create_micro_catchment(data, user):
+    if "client_mutation_id" in data:
+        data.pop("client_mutation_id")
+    if "client_mutation_label" in data:
+        data.pop("client_mutation_label")
+    return MicroCatchmentService(user).update_or_create(data)
+
+
+class CreateMicroCatchmentMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "CreateMicroCatchmentMutation"
+
+    class Input(MicroCatchmentInputType):
+        pass
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if MicroCatchmentService.check_unique_code(data.get("code")):
+                raise ValidationError(_("mutation.micro_catchment_code_duplicated"))
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            # TODO: Add proper permission check when permission is defined
+            # if not user.has_perms(LocationConfig.gql_mutation_create_micro_catchments_perms):
+            #     raise PermissionDenied(_("unauthorized"))
+
+            data["audit_user_id"] = user.id_for_audit
+            from core.utils import TimeUtils
+
+            data["validity_from"] = TimeUtils.now()
+            update_or_create_micro_catchment(data, user)
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_create_micro_catchment")
+                    % {"code": data.get("code", "unknown")},
+                    "detail": str(exc),
+                }
+            ]
+
+
+class UpdateMicroCatchmentMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "UpdateMicroCatchmentMutation"
+
+    class Input(MicroCatchmentInputType):
+        pass
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            # TODO: Add proper permission check when permission is defined
+            # if not user.has_perms(LocationConfig.gql_mutation_edit_micro_catchments_perms):
+            #     raise PermissionDenied(_("unauthorized"))
+
+            incoming_code = data["code"]
+            current_mc = MicroCatchment.objects.get(uuid=data["uuid"])
+            if current_mc.code != incoming_code:
+                if MicroCatchmentService.check_unique_code(incoming_code):
+                    raise ValidationError(_("mutation.micro_catchment_code_duplicated"))
+
+            data["audit_user_id"] = user.id_for_audit
+            from core.utils import TimeUtils
+
+            data["validity_from"] = TimeUtils.now()
+            update_or_create_micro_catchment(data, user)
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_update_micro_catchment")
+                    % {"code": data.get("code", "unknown")},
+                    "detail": str(exc),
+                }
+            ]
+
+
+class DeleteMicroCatchmentMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "DeleteMicroCatchmentMutation"
+
+    class Input(OpenIMISMutation.Input):
+        uuid = graphene.String()
+        code = graphene.String()
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            # TODO: Add proper permission check when permission is defined
+            # if not user.has_perms(LocationConfig.gql_mutation_delete_micro_catchments_perms):
+            #     raise PermissionDenied(_("unauthorized"))
+            mc = MicroCatchment.objects.get(uuid=data["uuid"])
+
+            from core import datetime
+
+            now = datetime.datetime.now()
+            mc.validity_to = now
+            mc.save()
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_delete_micro_catchment")
+                    % {"code": data.get("code", "unknown")},
                     "detail": str(exc),
                 }
             ]
