@@ -13,12 +13,16 @@ from location.gql_mutations import (
     CreateLocationMutation,
     UpdateLocationMutation,
     DeleteLocationMutation,
-    MoveLocationMutation
+    MoveLocationMutation,
+    CreateHotspotMutation,
+    UpdateHotspotMutation,
+    DeleteHotspotMutation,
 )
 from location.gql_queries import (
     UserDistrictGQLType,
     LocationGQLType,
     HealthFacilityGQLType,
+    HotspotGQLType,
 )
 from location.models import (
     HealthFacility,
@@ -27,6 +31,7 @@ from location.models import (
     UserDistrict,
     LocationMutation,
     HealthFacilityMutation,
+    Hotspot,
 )
 from location.services import LocationService, HealthFacilityService
 from location.apps import LocationConfig
@@ -40,6 +45,10 @@ class Query(graphene.ObjectType):
     health_facilities = OrderedDjangoFilterConnectionField(
         HealthFacilityGQLType,
         showHistory=graphene.Boolean(),
+        orderBy=graphene.List(of_type=graphene.String),
+    )
+    hotspots = OrderedDjangoFilterConnectionField(
+        HotspotGQLType,
         orderBy=graphene.List(of_type=graphene.String),
     )
     locations = OrderedDjangoFilterConnectionField(
@@ -78,6 +87,12 @@ class Query(graphene.ObjectType):
         health_facility_code=graphene.String(required=True),
         description="Checks that the specified health facility code is unique.",
     )
+
+    def resolve_hotspots(self, info, **kwargs):
+        if info.context.user.is_anonymous:
+            raise PermissionDenied(_("unauthorized"))
+        query = Hotspot.get_queryset(None, info.context.user)
+        return gql_optimizer.query(query.all(), info)
 
     def resolve_health_facilities(self, info, **kwargs):
         show_history = kwargs.get("showHistory", False) and info.context.user.has_perms(
@@ -197,6 +212,9 @@ class Mutation(graphene.ObjectType):
     create_health_facility = CreateHealthFacilityMutation.Field()
     update_health_facility = UpdateHealthFacilityMutation.Field()
     delete_health_facility = DeleteHealthFacilityMutation.Field()
+    create_hotspot = CreateHotspotMutation.Field()
+    update_hotspot = UpdateHotspotMutation.Field()
+    delete_hotspot = DeleteHotspotMutation.Field()
 
 
 def on_location_mutation(sender, **kwargs):

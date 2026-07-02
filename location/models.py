@@ -433,6 +433,58 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
         db_table = "tblLocations"
 
 
+class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
+    id = models.AutoField(db_column="HotspotId", primary_key=True)
+    uuid = models.CharField(
+        db_column="HotspotUUID", max_length=36, default=uuid.uuid4, unique=True
+    )
+    code = models.CharField(db_column="HotspotCode", max_length=50, unique=True)
+    name = models.CharField(db_column="HotspotName", max_length=100)
+    description = models.TextField(
+        db_column="HotspotDescription", blank=True, null=True
+    )
+    audit_user_id = models.IntegerField(
+        db_column="AuditUserID", blank=True, null=True
+    )
+    village = models.OneToOneField(
+        Location,
+        db_column="VillageId",
+        limit_choices_to={"type": "V"},
+        on_delete=models.CASCADE,
+        related_name="hotspot",
+    )
+    micro_catchment = models.ForeignKey(
+        Location,
+        db_column="MicroCatchmentId",
+        limit_choices_to={"type": "W"},
+        on_delete=models.CASCADE,
+        related_name="micro_catchment_hotspots",
+        blank=True,
+        null=True,
+    )
+    villages = models.ManyToManyField(
+        Location,
+        db_table="tblHotspotVillages",
+        related_name="hotspots",
+        blank=True,
+    )
+    legacy_id = models.IntegerField(db_column="LegacyID", blank=True, null=True)
+
+    def __str__(self):
+        return self.code or self.name
+
+    class Meta:
+        managed = True
+        db_table = "tblHotspots"
+        constraints = [
+            models.UniqueConstraint(
+                condition=Q(validity_to__isnull=True),
+                fields=("village",),
+                name="unique_active_hotspot_village",
+            )
+        ]
+
+
 class HealthFacilityLegalForm(models.Model):
     code = models.CharField(db_column="LegalFormCode", primary_key=True, max_length=1)
     legal_form = models.CharField(db_column="LegalForms", max_length=50)
