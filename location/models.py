@@ -473,6 +473,22 @@ class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
     def __str__(self):
         return self.code or self.name
 
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        queryset = cls.filter_queryset(queryset)
+        if isinstance(user, ResolveInfo):
+            user = user.context.user
+        if settings.ROW_SECURITY and user.is_anonymous:
+            return queryset.filter(id=-1)
+        if settings.ROW_SECURITY and not user._u.is_superuser:
+            return LocationManager().build_user_location_filter_query(
+                user._u,
+                prefix="village",
+                queryset=queryset,
+                loc_types=["V"],
+            )
+        return queryset
+
     class Meta:
         managed = True
         db_table = "tblHotspots"
