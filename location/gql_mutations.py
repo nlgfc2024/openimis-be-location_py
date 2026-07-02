@@ -475,22 +475,26 @@ class DeleteMicroCatchmentMutation(OpenIMISMutation):
     _mutation_class = "DeleteMicroCatchmentMutation"
 
     class Input(OpenIMISMutation.Input):
-        uuid = graphene.String()
-        code = graphene.String()
+        uuid = graphene.String(required=True)
+        code = graphene.String(required=True)
 
     @classmethod
     def async_mutate(cls, user, **data):
         try:
-            # TODO: Add proper permission check when permission is defined
-            # if not user.has_perms(LocationConfig.gql_mutation_delete_micro_catchments_perms):
-            #     raise PermissionDenied(_("unauthorized"))
-            mc = MicroCatchment.objects.get(uuid=data["uuid"])
+            if not user.has_perms(
+                LocationConfig.gql_mutation_delete_micro_catchments_perms
+            ):
+                raise PermissionDenied(_("unauthorized"))
+            mc = MicroCatchment.objects.get(
+                uuid=data["uuid"], validity_to__isnull=True
+            )
 
             from core import datetime
 
             now = datetime.datetime.now()
             mc.validity_to = now
-            mc.save()
+            mc.audit_user_id = user.id_for_audit
+            mc.save(update_fields=["validity_to", "audit_user_id"])
             return None
         except Exception as exc:
             return [
