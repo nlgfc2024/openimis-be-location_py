@@ -2,7 +2,7 @@ import graphene
 from .apps import LocationConfig
 from core import assert_string_length
 from core.schema import OpenIMISMutation
-from .models import Location, HealthFacility, UserDistrict, MicroCatchment
+from .models import Location, HealthFacility, UserDistrict, MicroCatchment, Hotspot
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils.translation import gettext as _
@@ -501,6 +501,156 @@ class DeleteMicroCatchmentMutation(OpenIMISMutation):
                 {
                     "message": _("location.mutation.failed_to_delete_micro_catchment")
                     % {"code": data.get("code", "unknown")},
+                    "detail": str(exc),
+                }
+            ]
+
+
+class HotspotInputType(OpenIMISMutation.Input):
+    id = graphene.Int(required=False, read_only=True)
+    uuid = graphene.String(required=False)
+    code = graphene.String(required=True)
+    name = graphene.String(required=True)
+    description = graphene.String(required=False)
+    micro_catchment_uuid = graphene.String(required=True)
+    village_uuids = graphene.List(graphene.String, required=True)
+    village_uuid = graphene.String(required=False)
+
+
+def update_or_create_hotspot(data, user):
+    if "client_mutation_id" in data:
+        data.pop("client_mutation_id")
+    if "client_mutation_label" in data:
+        data.pop("client_mutation_label")
+
+    micro_catchment_uuid = data.pop("micro_catchment_uuid", None)
+    village_uuids = data.pop("village_uuids", None) or []
+    village_uuid = data.pop("village_uuid", None)
+
+    if village_uuid and village_uuid not in village_uuids:
+        village_uuids.insert(0, village_uuid)
+
+    if not micro_catchment_uuid:
+        raise ValidationError(_("location.mutation.hotspot_micro_catchment_required"))
+    if not village_uuids:
+        raise ValidationError(_("location.mutation.hotspot_villages_required"))
+
+    micro_catchment = Location.objects.get(uuid=micro_catchment_uuid, type="W")
+    villages = list(
+        Location.objects.filter(
+            *Location.filter_validity(),
+            uuid__in=village_uuids,
+            type="V",
+            parent=micro_catchment,
+        )
+    )
+    if len(villages) != len(set(village_uuids)):
+        raise ValidationError(_("location.mutation.hotspot_invalid_villages"))
+
+    data["micro_catchment"] = micro_catchment
+    data["village"] = villages[0]
+
+    if not data.get("uuid"):
+        hotspot = Hotspot.objects.create(**data)
+        hotspot.villages.set(villages)
+        return hotspot
+
+    hotspot = Hotspot.objects.get(uuid=data["uuid"])
+    for field, value in data.items():
+        setattr(hotspot, field, value)
+    hotspot.save()
+    hotspot.villages.set(villages)
+    return hotspot
+
+
+class CreateHotspotMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "CreateHotspotMutation"
+
+    class Input(HotspotInputType):
+        pass
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            if not user.has_perms(LocationConfig.gql_mutation_create_locations_perms):
+                raise PermissionDenied(_("unauthorized"))
+
+            data["audit_user_id"] = user.id_for_audit
+            from core.utils import TimeUtils
+
+            data["validity_from"] = TimeUtils.now()
+            update_or_create_hotspot(data, user)
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_create_hotspot")
+                    % {"code": data.get("code", "")},
+                    "detail": str(exc),
+                }
+            ]
+
+
+class UpdateHotspotMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "UpdateHotspotMutation"
+
+    class Input(HotspotInputType):
+        pass
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            if not user.has_perms(LocationConfig.gql_mutation_edit_locations_perms):
+                raise PermissionDenied(_("unauthorized"))
+
+            data["audit_user_id"] = user.id_for_audit
+            from core.utils import TimeUtils
+
+            data["validity_from"] = TimeUtils.now()
+            update_or_create_hotspot(data, user)
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_update_hotspot")
+                    % {"code": data.get("code", "")},
+                    "detail": str(exc),
+                }
+            ]
+
+
+class DeleteHotspotMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "DeleteHotspotMutation"
+
+    class Input(OpenIMISMutation.Input):
+        uuid = graphene.String()
+        code = graphene.String()
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if not user.has_perms(LocationConfig.gql_mutation_delete_locations_perms):
+                raise PermissionDenied(_("unauthorized"))
+            hotspot = Hotspot.objects.get(uuid=data["uuid"])
+
+            from core import datetime
+
+            now = datetime.datetime.now()
+            hotspot.validity_to = now
+            hotspot.save()
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_delete_hotspot")
+                    % {"code": data.get("code", "")},
                     "detail": str(exc),
                 }
             ]
