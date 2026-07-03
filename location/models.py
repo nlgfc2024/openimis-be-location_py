@@ -484,6 +484,16 @@ class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
             )
         ]
 
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        if isinstance(user, ResolveInfo):
+            user = user.context.user
+        if queryset is None:
+            queryset = cls.objects.filter(*cls.filter_validity())
+        if settings.ROW_SECURITY and user.is_anonymous:
+            return queryset.filter(id=-1)
+        return queryset
+
 
 class HealthFacilityLegalForm(models.Model):
     code = models.CharField(db_column="LegalFormCode", primary_key=True, max_length=1)
