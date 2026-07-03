@@ -17,12 +17,17 @@ from location.gql_mutations import (
     CreateMicroCatchmentMutation,
     UpdateMicroCatchmentMutation,
     DeleteMicroCatchmentMutation,
+    CreateHotspotMutation,
+    UpdateHotspotMutation,
+    DeleteHotspotMutation,
+    get_hotspot_eligible_villages,
 )
 from location.gql_queries import (
     UserDistrictGQLType,
     LocationGQLType,
     HealthFacilityGQLType,
     MicroCatchmentGQLType,
+    HotspotGQLType,
 )
 from location.models import (
     HealthFacility,
@@ -32,6 +37,7 @@ from location.models import (
     LocationMutation,
     HealthFacilityMutation,
     MicroCatchment,
+    Hotspot,
 )
 from location.services import LocationService, HealthFacilityService
 from location.apps import LocationConfig
@@ -45,6 +51,10 @@ class Query(graphene.ObjectType):
     health_facilities = OrderedDjangoFilterConnectionField(
         HealthFacilityGQLType,
         showHistory=graphene.Boolean(),
+        orderBy=graphene.List(of_type=graphene.String),
+    )
+    hotspots = OrderedDjangoFilterConnectionField(
+        HotspotGQLType,
         orderBy=graphene.List(of_type=graphene.String),
     )
     locations = OrderedDjangoFilterConnectionField(
@@ -88,6 +98,29 @@ class Query(graphene.ObjectType):
         showHistory=graphene.Boolean(),
         orderBy=graphene.List(of_type=graphene.String),
     )
+    hotspot_eligible_villages = graphene.List(
+        LocationGQLType,
+        micro_catchment_uuid=graphene.String(required=True),
+        description="Villages selectable for a hotspot in the given micro-catchment "
+        "(villages under the micro-catchment's GVHs).",
+    )
+
+    def resolve_hotspot_eligible_villages(self, info, micro_catchment_uuid, **kwargs):
+        if info.context.user.is_anonymous:
+            raise PermissionDenied(_("unauthorized"))
+        try:
+            micro_catchment = MicroCatchment.objects.get(
+                uuid=micro_catchment_uuid, validity_to__isnull=True
+            )
+        except MicroCatchment.DoesNotExist:
+            return []
+        return get_hotspot_eligible_villages(micro_catchment).order_by("code")
+
+    def resolve_hotspots(self, info, **kwargs):
+        if info.context.user.is_anonymous:
+            raise PermissionDenied(_("unauthorized"))
+        query = Hotspot.get_queryset(None, info.context.user)
+        return gql_optimizer.query(query.all(), info)
 
     def resolve_health_facilities(self, info, **kwargs):
         show_history = kwargs.get("showHistory", False) and info.context.user.has_perms(
@@ -221,6 +254,9 @@ class Mutation(graphene.ObjectType):
     create_micro_catchment = CreateMicroCatchmentMutation.Field()
     update_micro_catchment = UpdateMicroCatchmentMutation.Field()
     delete_micro_catchment = DeleteMicroCatchmentMutation.Field()
+    create_hotspot = CreateHotspotMutation.Field()
+    update_hotspot = UpdateHotspotMutation.Field()
+    delete_hotspot = DeleteHotspotMutation.Field()
 
 
 def on_location_mutation(sender, **kwargs):

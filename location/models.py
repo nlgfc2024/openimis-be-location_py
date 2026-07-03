@@ -433,6 +433,82 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
         db_table = "tblLocations"
 
 
+class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
+    id = models.AutoField(db_column="HotspotId", primary_key=True)
+    uuid = models.CharField(
+        db_column="HotspotUUID", max_length=36, default=uuid.uuid4, unique=True
+    )
+    code = models.CharField(db_column="HotspotCode", max_length=50, unique=True)
+    name = models.CharField(db_column="HotspotName", max_length=100)
+    description = models.TextField(
+        db_column="HotspotDescription", blank=True, null=True
+    )
+    audit_user_id = models.IntegerField(
+        db_column="AuditUserID", blank=True, null=True
+    )
+    micro_catchment = models.ForeignKey(
+        "MicroCatchment",
+        db_column="MicroCatchmentId",
+        on_delete=models.CASCADE,
+        related_name="hotspots",
+    )
+    legacy_id = models.IntegerField(db_column="LegacyID", blank=True, null=True)
+
+    def __str__(self):
+        return self.code or self.name
+
+    @property
+    def villages(self):
+        # Villages linked through the HotspotVillage table (active links only).
+        return Location.objects.filter(
+            *Location.filter_validity(),
+            hotspot_links__hotspot=self,
+            hotspot_links__validity_to__isnull=True,
+        )
+
+    class Meta:
+        managed = True
+        db_table = "tblHotspots"
+
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        if isinstance(user, ResolveInfo):
+            user = user.context.user
+        if queryset is None:
+            queryset = cls.objects.filter(*cls.filter_validity())
+        if settings.ROW_SECURITY and user.is_anonymous:
+            return queryset.filter(id=-1)
+        return queryset
+
+
+class HotspotVillage(core_models.VersionedModel):
+    """Link table for Hotspot to its villages (Location type V).
+
+    Uses an explicit through-model (not a Django M2M) because the core pre_save
+    validator accesses M2M descriptors on unsaved VersionedModel instances,
+    which fails on create.
+    """
+    id = models.AutoField(db_column="HotspotVillageId", primary_key=True)
+    hotspot = models.ForeignKey(
+        Hotspot,
+        models.CASCADE,
+        db_column="HotspotId",
+        related_name="village_links",
+    )
+    location = models.ForeignKey(
+        Location,
+        models.CASCADE,
+        db_column="LocationId",
+        limit_choices_to={"type": "V"},
+        related_name="hotspot_links",
+    )
+    audit_user_id = models.IntegerField(db_column="AuditUserID", blank=True, null=True)
+
+    class Meta:
+        managed = True
+        db_table = "tblHotspotVillages"
+
+
 class HealthFacilityLegalForm(models.Model):
     code = models.CharField(db_column="LegalFormCode", primary_key=True, max_length=1)
     legal_form = models.CharField(db_column="LegalForms", max_length=50)
@@ -757,7 +833,8 @@ class MicroCatchment(core_models.VersionedModel):
         null=True,
         blank=True,
         related_name="micro_catchments",
-        limit_choices_to={"type": "D"},
+        # District = top level of the Malawi hierarchy (Location type R).
+        limit_choices_to={"type": "R"},
     )
     date_from = models.DateField(db_column="DateFrom", null=True, blank=True)
     date_to = models.DateField(db_column="DateTo", null=True, blank=True)
@@ -781,7 +858,7 @@ class MicroCatchment(core_models.VersionedModel):
 
 
 class MicroCatchmentTA(core_models.VersionedModel):
-    """Link table for Micro Catchment to Traditional Authority (Location type W)"""
+    """Link table for Micro Catchment to Traditional Authority (Location type D)"""
     id = models.AutoField(db_column="MicroCatchmentTAId", primary_key=True)
     micro_catchment = models.ForeignKey(
         MicroCatchment,
@@ -794,6 +871,8 @@ class MicroCatchmentTA(core_models.VersionedModel):
         models.CASCADE,
         db_column="LocationId",
         related_name="micro_catchments_ta",
+        # TA = Location type D under the Malawi hierarchy.
+        limit_choices_to={"type": "D"},
     )
     audit_user_id = models.IntegerField(db_column="AuditUserID")
 
@@ -803,7 +882,7 @@ class MicroCatchmentTA(core_models.VersionedModel):
 
 
 class MicroCatchmentGVH(core_models.VersionedModel):
-    """Link table for Micro Catchment to GVH (Group Village Headman)"""
+    """Link table for Micro Catchment to GVH (Group Village Headman, Location type W)"""
     id = models.AutoField(db_column="MicroCatchmentGVHId", primary_key=True)
     micro_catchment = models.ForeignKey(
         MicroCatchment,
@@ -816,6 +895,8 @@ class MicroCatchmentGVH(core_models.VersionedModel):
         models.CASCADE,
         db_column="LocationId",
         related_name="micro_catchments_gvh",
+        # GVH = Location type W under the Malawi hierarchy.
+        limit_choices_to={"type": "W"},
     )
     audit_user_id = models.IntegerField(db_column="AuditUserID")
 

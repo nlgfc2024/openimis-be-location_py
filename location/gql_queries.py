@@ -17,6 +17,7 @@ from location.models import (
     MicroCatchment,
     MicroCatchmentTA,
     MicroCatchmentGVH,
+    Hotspot,
 )
 from django.db.models import Field
 
@@ -130,6 +131,48 @@ class HealthFacilityGQLType(DjangoObjectType):
             if health_facility_mutation
             else None
         )
+
+
+class HotspotGQLType(DjangoObjectType):
+    client_mutation_id = graphene.String()
+    villages = graphene.List(LocationGQLType)
+
+    class Meta:
+        model = Hotspot
+        interfaces = (graphene.relay.Node,)
+        filter_fields = {
+            "id": ["exact"],
+            "uuid": ["exact"],
+            "code": ["exact", "istartswith", "icontains", "iexact", "ne"],
+            "name": ["exact", "istartswith", "icontains", "iexact", "ne"],
+            # Micro-Catchment (mandatory link)
+            "micro_catchment__uuid": ["exact", "in"],
+            "micro_catchment__name": ["exact", "istartswith", "icontains", "iexact"],
+            # TA the micro-catchment sits under (Location type D under the Malawi mapping)
+            "micro_catchment__district__uuid": ["exact", "in"],
+            # District (Location type R = top level under the Malawi mapping)
+            "micro_catchment__district__parent__uuid": ["exact", "in"],
+            # Villages attached to the hotspot (through the HotspotVillage link table)
+            "village_links__location__uuid": ["exact", "in"],
+            "village_links__location__parent__uuid": ["exact", "in"],
+            "village_links__location__parent__parent__uuid": ["exact", "in"],
+            "village_links__location__parent__parent__parent__uuid": ["exact", "in"],
+        }
+        connection_class = ExtendedConnection
+
+    def resolve_villages(self, info):
+        if not info.context.user.is_authenticated:
+            raise PermissionDenied(_("unauthorized"))
+        return self.villages
+
+    def resolve_client_mutation_id(self, info):
+        if not info.context.user.is_authenticated:
+            raise PermissionDenied(_("unauthorized"))
+        return None
+
+    @classmethod
+    def get_queryset(cls, queryset, info):
+        return Hotspot.get_queryset(queryset, info.context.user)
 
 
 class UserRegionGQLType(graphene.ObjectType):
