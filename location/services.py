@@ -15,6 +15,9 @@ from location.models import (
     HealthFacility,
     HealthFacilityCatchment,
     UserDistrict,
+    MicroCatchment,
+    MicroCatchmentTA,
+    MicroCatchmentGVH,
 )
 
 
@@ -248,3 +251,127 @@ class HealthFacilityService:
         hf.care_type = None
         hf.services_pricelist = None
         hf.items_pricelist = None
+
+
+class MicroCatchmentService:
+    def __init__(self, user):
+        self.user = user
+
+    @staticmethod
+    def check_unique_code(code):
+        if MicroCatchment.objects.filter(code=code, validity_to__isnull=True).exists():
+            return [{"message": "Micro Catchment code %s already exists" % code}]
+        return []
+
+    def validate_data(self, **data):
+        error = self.check_unique_code(data["code"])
+        return error
+
+    def _validate_micro_catchment_relations(self, data, ta_ids, gvh_ids):
+        district_id = data.get("district_id")
+        if not district_id:
+            raise ValidationError("District is required")
+
+        if not ta_ids:
+            raise ValidationError("At least one Traditional Authority is required")
+
+        if not gvh_ids:
+            raise ValidationError("At least one GVH is required")
+
+        # Malawi hierarchy: District = type R, TA = type D, GVH = type W, Village = type V.
+        district = Location.objects.filter(
+            id=district_id,
+            type="R",
+            validity_to__isnull=True,
+        ).first()
+        if not district:
+            raise ValidationError("Invalid district")
+
+        ta_ids_set = set(ta_ids)
+        valid_ta_ids = set(
+            Location.objects.filter(
+                id__in=ta_ids_set,
+                type="D",
+                parent_id=district.id,
+                validity_to__isnull=True,
+            ).values_list("id", flat=True)
+        )
+        if valid_ta_ids != ta_ids_set:
+            raise ValidationError("Traditional Authorities must belong to the selected district")
+
+        gvh_ids_set = set(gvh_ids)
+        valid_gvh_ids = set(
+            Location.objects.filter(
+                id__in=gvh_ids_set,
+                type="W",
+                parent_id__in=valid_ta_ids,
+                validity_to__isnull=True,
+            ).values_list("id", flat=True)
+        )
+        if valid_gvh_ids != gvh_ids_set:
+            raise ValidationError("GVHs must belong to selected Traditional Authorities")
+
+    @register_service_signal("micro_catchment_service.update_or_create")
+    def update_or_create(self, data):
+        ta_ids = data.pop("ta_ids", []) or []
+        gvh_ids = data.pop("gvh_ids", []) or []
+        micro_catchment_uuid = data.pop("uuid") if "uuid" in data else None
+
+        self._validate_micro_catchment_relations(data, ta_ids, gvh_ids)
+
+        if micro_catchment_uuid:
+            micro_catchment = MicroCatchment.objects.get(uuid=micro_catchment_uuid)
+            micro_catchment.save_history()
+            [setattr(micro_catchment, key, data[key]) for key in data]
+        else:
+            micro_catchment = MicroCatchment.objects.create(**data)
+
+        micro_catchment.save()
+
+        # Sync Traditional Authorities
+        if ta_ids is not None:
+            from core.utils import TimeUtils
+            now = TimeUtils.now()
+            # Soft-delete removed ones
+            micro_catchment.traditional_authorities.filter(
+                validity_to__isnull=True
+            ).exclude(location_id__in=ta_ids).update(validity_to=now)
+            # Add new ones
+            existing_ta_ids = set(
+                micro_catchment.traditional_authorities.filter(
+                    validity_to__isnull=True
+                ).values_list("location_id", flat=True)
+            )
+            for loc_id in ta_ids:
+                if loc_id not in existing_ta_ids:
+                    MicroCatchmentTA.objects.create(
+                        micro_catchment=micro_catchment,
+                        location_id=loc_id,
+                        audit_user_id=self.user.id_for_audit,
+                        validity_from=now,
+                    )
+
+        # Sync GVHs
+        if gvh_ids is not None:
+            from core.utils import TimeUtils
+            now = TimeUtils.now()
+            # Soft-delete removed ones
+            micro_catchment.gvhs.filter(
+                validity_to__isnull=True
+            ).exclude(location_id__in=gvh_ids).update(validity_to=now)
+            # Add new ones
+            existing_gvh_ids = set(
+                micro_catchment.gvhs.filter(
+                    validity_to__isnull=True
+                ).values_list("location_id", flat=True)
+            )
+            for loc_id in gvh_ids:
+                if loc_id not in existing_gvh_ids:
+                    MicroCatchmentGVH.objects.create(
+                        micro_catchment=micro_catchment,
+                        location_id=loc_id,
+                        audit_user_id=self.user.id_for_audit,
+                        validity_from=now,
+                    )
+
+        return micro_catchment

@@ -14,6 +14,9 @@ DEFAULT_CFG = {
     "gql_mutation_create_health_facilities_perms": ["121102"],
     "gql_mutation_edit_health_facilities_perms": ["121103"],
     "gql_mutation_delete_health_facilities_perms": ["121104"],
+    "gql_mutation_delete_micro_catchments_perms": ["159003"],
+    "import_micro_catchments_perms": ["159004"],
+    "export_micro_catchments_perms": ["159005"],
     "no_location_check": False,
     "health_facility_level": [
         {
@@ -32,7 +35,6 @@ DEFAULT_CFG = {
     "health_facility_contract_dates_mandatory": False,
 }
 
-
 class LocationConfig(AppConfig):
     name = MODULE_NAME
 
@@ -47,6 +49,9 @@ class LocationConfig(AppConfig):
     gql_mutation_create_health_facilities_perms = []
     gql_mutation_edit_health_facilities_perms = []
     gql_mutation_delete_health_facilities_perms = []
+    gql_mutation_delete_micro_catchments_perms = ["159003"]
+    import_micro_catchments_perms = ["159004"]
+    export_micro_catchments_perms = ["159005"]
     no_location_check = None
     health_facility_level = []
     health_facility_contract_dates_mandatory = None
