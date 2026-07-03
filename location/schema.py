@@ -20,6 +20,7 @@ from location.gql_mutations import (
     CreateHotspotMutation,
     UpdateHotspotMutation,
     DeleteHotspotMutation,
+    get_hotspot_eligible_villages,
 )
 from location.gql_queries import (
     UserDistrictGQLType,
@@ -97,6 +98,23 @@ class Query(graphene.ObjectType):
         showHistory=graphene.Boolean(),
         orderBy=graphene.List(of_type=graphene.String),
     )
+    hotspot_eligible_villages = graphene.List(
+        LocationGQLType,
+        micro_catchment_uuid=graphene.String(required=True),
+        description="Villages selectable for a hotspot in the given micro-catchment "
+        "(villages under the micro-catchment's GVHs).",
+    )
+
+    def resolve_hotspot_eligible_villages(self, info, micro_catchment_uuid, **kwargs):
+        if info.context.user.is_anonymous:
+            raise PermissionDenied(_("unauthorized"))
+        try:
+            micro_catchment = MicroCatchment.objects.get(
+                uuid=micro_catchment_uuid, validity_to__isnull=True
+            )
+        except MicroCatchment.DoesNotExist:
+            return []
+        return get_hotspot_eligible_villages(micro_catchment).order_by("code")
 
     def resolve_hotspots(self, info, **kwargs):
         if info.context.user.is_anonymous:

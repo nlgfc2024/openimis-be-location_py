@@ -278,9 +278,10 @@ class MicroCatchmentService:
         if not gvh_ids:
             raise ValidationError("At least one GVH is required")
 
+        # Malawi hierarchy: District = type R, TA = type D, GVH = type W, Village = type V.
         district = Location.objects.filter(
             id=district_id,
-            type="D",
+            type="R",
             validity_to__isnull=True,
         ).first()
         if not district:
@@ -290,7 +291,7 @@ class MicroCatchmentService:
         valid_ta_ids = set(
             Location.objects.filter(
                 id__in=ta_ids_set,
-                type="W",
+                type="D",
                 parent_id=district.id,
                 validity_to__isnull=True,
             ).values_list("id", flat=True)
@@ -302,7 +303,7 @@ class MicroCatchmentService:
         valid_gvh_ids = set(
             Location.objects.filter(
                 id__in=gvh_ids_set,
-                type="V",
+                type="W",
                 parent_id__in=valid_ta_ids,
                 validity_to__isnull=True,
             ).values_list("id", flat=True)

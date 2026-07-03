@@ -2,7 +2,7 @@ import graphene
 from .apps import LocationConfig
 from core import assert_string_length
 from core.schema import OpenIMISMutation
-from .models import Location, HealthFacility, UserDistrict, MicroCatchment, Hotspot
+from .models import Location, HealthFacility, UserDistrict, MicroCatchment, Hotspot, HotspotVillage
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils.translation import gettext as _
@@ -514,7 +514,24 @@ class HotspotInputType(OpenIMISMutation.Input):
     description = graphene.String(required=False)
     micro_catchment_uuid = graphene.String(required=True)
     village_uuids = graphene.List(graphene.String, required=True)
-    village_uuid = graphene.String(required=False)
+
+
+def get_hotspot_eligible_villages(micro_catchment):
+    """
+    Villages (Location type V) that can be attached to a hotspot for the given
+    micro-catchment: those whose parent GVH (Location type W under the Malawi
+    mapping) belongs to the micro-catchment's GVH set (its `gvhs` links).
+    """
+    gvh_locations = Location.objects.filter(
+        *Location.filter_validity(),
+        micro_catchments_gvh__micro_catchment=micro_catchment,
+        micro_catchments_gvh__validity_to__isnull=True,
+    )
+    return Location.objects.filter(
+        *Location.filter_validity(),
+        type="V",
+        parent__in=gvh_locations,
+    )
 
 
 def update_or_create_hotspot(data, user):
@@ -524,43 +541,68 @@ def update_or_create_hotspot(data, user):
         data.pop("client_mutation_label")
 
     micro_catchment_uuid = data.pop("micro_catchment_uuid", None)
-    village_uuids = data.pop("village_uuids", None) or []
-    village_uuid = data.pop("village_uuid", None)
-
-    if village_uuid and village_uuid not in village_uuids:
-        village_uuids.insert(0, village_uuid)
+    village_uuids = list(dict.fromkeys(data.pop("village_uuids", None) or []))
 
     if not micro_catchment_uuid:
         raise ValidationError(_("location.mutation.hotspot_micro_catchment_required"))
     if not village_uuids:
         raise ValidationError(_("location.mutation.hotspot_villages_required"))
 
-    micro_catchment = Location.objects.get(uuid=micro_catchment_uuid, type="W")
-    villages = list(
-        Location.objects.filter(
-            *Location.filter_validity(),
-            uuid__in=village_uuids,
-            type="V",
-            parent=micro_catchment,
+    try:
+        micro_catchment = MicroCatchment.objects.get(
+            uuid=micro_catchment_uuid, validity_to__isnull=True
         )
-    )
-    if len(villages) != len(set(village_uuids)):
+    except MicroCatchment.DoesNotExist:
+        raise ValidationError(_("location.mutation.hotspot_micro_catchment_required"))
+
+    eligible_villages = get_hotspot_eligible_villages(micro_catchment)
+    villages = list(eligible_villages.filter(uuid__in=village_uuids))
+    if len(villages) != len(village_uuids):
         raise ValidationError(_("location.mutation.hotspot_invalid_villages"))
 
+    # A village must belong to only one hotspot: reject any village already
+    # attached to another active hotspot.
+    conflicting = (
+        Hotspot.objects.filter(
+            validity_to__isnull=True,
+            village_links__location__in=villages,
+            village_links__validity_to__isnull=True,
+        )
+        .exclude(uuid=data.get("uuid"))
+        .distinct()
+    )
+    if conflicting.exists():
+        raise ValidationError(_("location.mutation.hotspot_village_already_assigned"))
+
     data["micro_catchment"] = micro_catchment
-    data["village"] = villages[0]
 
     if not data.get("uuid"):
         hotspot = Hotspot.objects.create(**data)
-        hotspot.villages.set(villages)
-        return hotspot
+    else:
+        hotspot = Hotspot.objects.get(uuid=data["uuid"])
+        for field, value in data.items():
+            setattr(hotspot, field, value)
+        hotspot.save()
 
-    hotspot = Hotspot.objects.get(uuid=data["uuid"])
-    for field, value in data.items():
-        setattr(hotspot, field, value)
-    hotspot.save()
-    hotspot.villages.set(villages)
+    _set_hotspot_villages(hotspot, villages, data.get("audit_user_id"))
     return hotspot
+
+
+def _set_hotspot_villages(hotspot, villages, audit_user_id):
+    from core.utils import TimeUtils
+
+    village_ids = {v.id for v in villages}
+    # Drop links that are no longer selected.
+    hotspot.village_links.exclude(location_id__in=village_ids).delete()
+    existing_ids = set(hotspot.village_links.values_list("location_id", flat=True))
+    for village in villages:
+        if village.id not in existing_ids:
+            HotspotVillage.objects.create(
+                hotspot=hotspot,
+                location=village,
+                audit_user_id=audit_user_id,
+                validity_from=TimeUtils.now(),
+            )
 
 
 class CreateHotspotMutation(OpenIMISMutation):
