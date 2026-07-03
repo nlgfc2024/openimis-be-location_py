@@ -148,10 +148,8 @@ class HotspotGQLType(DjangoObjectType):
             # Micro-Catchment (mandatory link)
             "micro_catchment__uuid": ["exact", "in"],
             "micro_catchment__name": ["exact", "istartswith", "icontains", "iexact"],
-            # TA the micro-catchment sits under (Location type D under the Malawi mapping)
+            # District = the micro-catchment's district (Location type R, top level of the Malawi mapping)
             "micro_catchment__district__uuid": ["exact", "in"],
-            # District (Location type R = top level under the Malawi mapping)
-            "micro_catchment__district__parent__uuid": ["exact", "in"],
             # Villages attached to the hotspot (through the HotspotVillage link table)
             "village_links__location__uuid": ["exact", "in"],
             "village_links__location__parent__uuid": ["exact", "in"],
