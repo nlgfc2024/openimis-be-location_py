@@ -516,7 +516,7 @@ class HotspotInputType(OpenIMISMutation.Input):
     village_uuids = graphene.List(graphene.String, required=True)
 
 
-def get_hotspot_eligible_villages(micro_catchment):
+def get_hotspot_eligible_villages(micro_catchment, hotspot=None):
     """
     Villages (Location type V) that can be attached to a hotspot for the given
     micro-catchment: those whose parent GVH (Location type W under the Malawi
@@ -527,10 +527,19 @@ def get_hotspot_eligible_villages(micro_catchment):
         micro_catchments_gvh__micro_catchment=micro_catchment,
         micro_catchments_gvh__validity_to__isnull=True,
     )
-    return Location.objects.filter(
+    villages = Location.objects.filter(
         *Location.filter_validity(),
         type="V",
         parent__in=gvh_locations,
+    )
+    assigned_villages = HotspotVillage.objects.filter(
+        validity_to__isnull=True,
+        hotspot__validity_to__isnull=True,
+    )
+    if hotspot:
+        assigned_villages = assigned_villages.exclude(hotspot=hotspot)
+    return villages.exclude(
+        id__in=assigned_villages.values_list("location_id", flat=True)
     )
 
 
@@ -555,7 +564,12 @@ def update_or_create_hotspot(data, user):
     except MicroCatchment.DoesNotExist:
         raise ValidationError(_("location.mutation.hotspot_micro_catchment_required"))
 
-    eligible_villages = get_hotspot_eligible_villages(micro_catchment)
+    current_hotspot = None
+    if data.get("uuid"):
+        current_hotspot = Hotspot.objects.filter(
+            uuid=data["uuid"], validity_to__isnull=True
+        ).first()
+    eligible_villages = get_hotspot_eligible_villages(micro_catchment, current_hotspot)
     villages = list(eligible_villages.filter(uuid__in=village_uuids))
     if len(villages) != len(village_uuids):
         raise ValidationError(_("location.mutation.hotspot_invalid_villages"))

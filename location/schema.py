@@ -101,11 +101,12 @@ class Query(graphene.ObjectType):
     hotspot_eligible_villages = graphene.List(
         LocationGQLType,
         micro_catchment_uuid=graphene.String(required=True),
+        hotspot_uuid=graphene.String(required=False),
         description="Villages selectable for a hotspot in the given micro-catchment "
         "(villages under the micro-catchment's GVHs).",
     )
 
-    def resolve_hotspot_eligible_villages(self, info, micro_catchment_uuid, **kwargs):
+    def resolve_hotspot_eligible_villages(self, info, micro_catchment_uuid, hotspot_uuid=None, **kwargs):
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
         try:
@@ -114,7 +115,12 @@ class Query(graphene.ObjectType):
             )
         except MicroCatchment.DoesNotExist:
             return []
-        return get_hotspot_eligible_villages(micro_catchment).order_by("code")
+        hotspot = None
+        if hotspot_uuid:
+            hotspot = Hotspot.objects.filter(
+                uuid=hotspot_uuid, validity_to__isnull=True
+            ).first()
+        return get_hotspot_eligible_villages(micro_catchment, hotspot).order_by("code")
 
     def resolve_hotspots(self, info, **kwargs):
         if info.context.user.is_anonymous:
