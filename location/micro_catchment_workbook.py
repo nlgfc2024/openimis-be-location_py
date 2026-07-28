@@ -1,5 +1,6 @@
+import csv
 from datetime import date, datetime
-from io import BytesIO
+from io import BytesIO, StringIO
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -12,6 +13,20 @@ from core.utils import TimeUtils
 from .models import Location, MicroCatchment, MicroCatchmentGVH, MicroCatchmentTA
 
 
+CSV_HEADERS = (
+    "district_code",
+    "district_name",
+    "ta_code",
+    "ta_name",
+    "gvh_code",
+    "gvh_name",
+    "micro_catchment_code",
+    "micro_catchment_name",
+    "start_date",
+    "end_date",
+)
+
+
 HEADERS = (
     "code",
     "name",
@@ -22,6 +37,51 @@ HEADERS = (
     "date_from",
     "date_to",
 )
+
+EXPORT_HEADERS = (
+    "code",
+    "micro_catchment_name",
+    "type",
+    "district_code",
+    "ta_code",
+    "ta_name",
+    "gvh_code",
+    "gvh_name",
+    "date_from",
+    "date_to",
+)
+
+
+def build_template_workbook(district):
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "MicroCatchments"
+    sheet.append(CSV_HEADERS)
+    traditional_authorities = Location.objects.filter(
+        type="D",
+        parent=district,
+        validity_to__isnull=True,
+    ).order_by("code")
+    rows_written = False
+    for ta in traditional_authorities:
+        gvhs = Location.objects.filter(
+            type="W",
+            parent=ta,
+            validity_to__isnull=True,
+        ).order_by("code")
+        ta_has_gvhs = False
+        for gvh in gvhs:
+            sheet.append((district.code, district.name, ta.code, ta.name, gvh.code, gvh.name, "", "", "", ""))
+            rows_written = ta_has_gvhs = True
+        if not ta_has_gvhs:
+            sheet.append((district.code, district.name, ta.code, ta.name, "", "", "", "", "", ""))
+            rows_written = True
+    if not rows_written:
+        sheet.append((district.code, district.name, "", "", "", "", "", "", "", ""))
+    _format_sheet(sheet)
+    output = BytesIO()
+    workbook.save(output)
+    return output.getvalue()
 
 
 def _cell_text(value):
@@ -64,7 +124,7 @@ def build_workbook(district):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = "MicroCatchments"
-    sheet.append(HEADERS)
+    sheet.append(EXPORT_HEADERS)
 
     catchments = (
         MicroCatchment.objects.filter(district=district, validity_to__isnull=True)
@@ -72,58 +132,55 @@ def build_workbook(district):
         .order_by("code")
     )
     for catchment in catchments:
-        ta_codes = catchment.traditional_authorities.filter(
-            validity_to__isnull=True
-        ).values_list("location__code", flat=True)
-        gvh_codes = catchment.gvhs.filter(validity_to__isnull=True).values_list(
-            "location__code", flat=True
-        )
-        sheet.append(
+        ta_locations = [
+            link.location
+            for link in catchment.traditional_authorities.filter(
+                validity_to__isnull=True
+            ).select_related("location")
+        ]
+        gvh_locations = [
+            link.location
+            for link in catchment.gvhs.filter(
+                validity_to__isnull=True
+            ).select_related("location__parent")
+        ]
+
+        rows = [
             (
-                catchment.code,
-                catchment.name,
-                catchment.type or "",
-                district.code,
-                ",".join(ta_codes),
-                ",".join(gvh_codes),
-                catchment.date_from,
-                catchment.date_to,
+                gvh.parent.code if gvh.parent else "",
+                gvh.parent.name if gvh.parent else "",
+                gvh.code,
+                gvh.name,
             )
-        )
+            for gvh in gvh_locations
+        ]
+        if not rows:
+            rows = [(ta.code, ta.name, "", "") for ta in ta_locations] or [("", "", "", "")]
+
+        for ta_code, ta_name, gvh_code, gvh_name in rows:
+            sheet.append(
+                (
+                    catchment.code,
+                    catchment.name,
+                    catchment.type or "",
+                    district.code,
+                    ta_code,
+                    ta_name,
+                    gvh_code,
+                    gvh_name,
+                    catchment.date_from,
+                    catchment.date_to,
+                )
+            )
 
     # Keep an immediately usable blank row when a district has no catchments yet.
     if sheet.max_row == 1:
         sheet.append(("", "", "", district.code, "", "", "", ""))
 
-    reference = workbook.create_sheet("DistrictLocations")
-    reference.append(("type", "code", "name", "parent_code"))
-    locations = Location.objects.filter(
-        validity_to__isnull=True,
-        type__in=("W", "V"),
-    ).filter(
-        models_for_district(district)
-    ).select_related("parent").order_by("type", "code")
-    for location in locations:
-        reference.append(
-            (
-                "TA" if location.type == "W" else "GVH",
-                location.code,
-                location.name,
-                location.parent.code if location.parent else "",
-            )
-        )
-
     _format_sheet(sheet)
-    _format_sheet(reference)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
-
-
-def models_for_district(district):
-    from django.db.models import Q
-
-    return Q(type="W", parent=district) | Q(type="V", parent__parent=district)
 
 
 def parse_workbook(uploaded_file, district):
@@ -231,6 +288,124 @@ def parse_workbook(uploaded_file, district):
 @transaction.atomic
 def import_workbook(uploaded_file, district, audit_user_id):
     records = parse_workbook(uploaded_file, district)
+    return import_records(records, district, audit_user_id)
+
+
+def import_csv(uploaded_file, district, audit_user_id):
+    try:
+        content = uploaded_file.read().decode("utf-8-sig")
+        reader = csv.DictReader(StringIO(content))
+        supplied_headers = tuple((header or "").strip().lower() for header in (reader.fieldnames or ()))
+    except (UnicodeDecodeError, csv.Error) as exc:
+        raise ValidationError("The uploaded file is not a valid UTF-8 CSV file.") from exc
+
+    missing = [header for header in CSV_HEADERS if header not in supplied_headers]
+    if missing:
+        raise ValidationError("Missing required columns: %s." % ", ".join(missing))
+
+    grouped = {}
+    errors = []
+    for row_number, row in enumerate(reader, start=2):
+        values = {(key or "").strip().lower(): _cell_text(value) for key, value in row.items()}
+        code = values["micro_catchment_code"]
+        name = values["micro_catchment_name"]
+        ta_code = values["ta_code"]
+        gvh_code = values["gvh_code"]
+        if not code and not name:
+            continue
+
+        row_errors = []
+        if values["district_code"] != district.code:
+            row_errors.append(f"district_code must be {district.code}")
+        if not code:
+            row_errors.append("micro_catchment_code is required")
+        if not name:
+            row_errors.append("micro_catchment_name is required")
+        ta = Location.objects.filter(
+            code=ta_code,
+            type="D",
+            parent=district,
+            validity_to__isnull=True,
+        ).first()
+        if not ta:
+            row_errors.append(f"invalid TA code: {ta_code}")
+        gvh = None
+        if gvh_code and ta:
+            gvh = Location.objects.filter(
+                code=gvh_code,
+                type="W",
+                parent=ta,
+                validity_to__isnull=True,
+            ).first()
+            if not gvh:
+                row_errors.append(f"invalid GVH code: {gvh_code}")
+        try:
+            start_date = _date(values["start_date"], "start_date", row_number)
+            end_date = _date(values["end_date"], "end_date", row_number)
+            if start_date and end_date and end_date < start_date:
+                row_errors.append("end_date cannot be before start_date")
+        except ValidationError as exc:
+            row_errors.extend(exc.messages)
+            start_date = end_date = None
+        if row_errors:
+            errors.append("Row %s: %s." % (row_number, "; ".join(row_errors)))
+            continue
+
+        record = grouped.setdefault(
+            code,
+            {"name": name, "tas": [], "gvhs": [], "start_date": start_date, "end_date": end_date},
+        )
+        if record["name"] != name:
+            errors.append(f"Row {row_number}: micro_catchment_name is inconsistent for code {code}.")
+        elif record["start_date"] != start_date or record["end_date"] != end_date:
+            errors.append(f"Row {row_number}: start_date or end_date is inconsistent for code {code}.")
+        elif ta.id not in {location.id for location in record["tas"]}:
+            record["tas"].append(ta)
+        if gvh and gvh.id not in {location.id for location in record["gvhs"]}:
+            record["gvhs"].append(gvh)
+
+    if errors:
+        raise ValidationError(errors)
+    if not grouped:
+        raise ValidationError("The CSV contains no completed micro-catchment rows.")
+
+    records = [
+        {
+            "code": code,
+            "name": values["name"],
+            "type": None,
+            "date_from": values["start_date"],
+            "date_to": values["end_date"],
+            "tas": values["tas"],
+            "gvhs": values["gvhs"],
+        }
+        for code, values in grouped.items()
+    ]
+    return import_records(records, district, audit_user_id)
+
+
+def import_excel(uploaded_file, district, audit_user_id):
+    try:
+        workbook = load_workbook(uploaded_file, data_only=True, read_only=True)
+        sheet = workbook["MicroCatchments"]
+        first_row = next(sheet.iter_rows(values_only=True))
+        headers = tuple(_cell_text(value).lower() for value in first_row)
+    except Exception as exc:
+        raise ValidationError("The uploaded file is not a valid MicroCatchments workbook.") from exc
+
+    uploaded_file.seek(0)
+    if all(header in headers for header in CSV_HEADERS):
+        output = StringIO(newline="")
+        writer = csv.writer(output)
+        for row in sheet.iter_rows(values_only=True):
+            writer.writerow(row)
+        converted = BytesIO(output.getvalue().encode("utf-8-sig"))
+        return import_csv(converted, district, audit_user_id)
+    return import_workbook(uploaded_file, district, audit_user_id)
+
+
+@transaction.atomic
+def import_records(records, district, audit_user_id):
     now = TimeUtils.now()
     created = updated = 0
 
