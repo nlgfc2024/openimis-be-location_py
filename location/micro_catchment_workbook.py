@@ -175,7 +175,7 @@ def build_workbook(district):
 
     # Keep an immediately usable blank row when a district has no catchments yet.
     if sheet.max_row == 1:
-        sheet.append(("", "", "", district.code, "", "", "", ""))
+        sheet.append(("", "", "", district.code, "", "", "", "", "", ""))
 
     _format_sheet(sheet)
     output = BytesIO()
