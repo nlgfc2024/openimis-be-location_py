@@ -7,6 +7,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
 from django.db.models import Q
 from django.utils.translation import gettext as _
+from django.db import transaction
 
 from core.signals import register_service_signal
 from location.apps import LocationConfig
@@ -18,6 +19,8 @@ from location.models import (
     MicroCatchment,
     MicroCatchmentTA,
     MicroCatchmentGVH,
+    Catchment,
+    CatchmentDistrict,
 )
 
 
@@ -375,3 +378,101 @@ class MicroCatchmentService:
                     )
 
         return micro_catchment
+
+class CatchmentService:
+    def __init__(self, user):
+        self.user = user
+
+    @staticmethod
+    def check_unique_code(code, exclude_uuid=None):
+        query = Catchment.objects.filter(
+            code__iexact=code,
+            validity_to__isnull=True,
+        )
+        if exclude_uuid:
+            query = query.exclude(uuid=exclude_uuid)
+        if query.exists():
+            raise ValidationError(f"Catchment code {code} already exists")
+
+    @staticmethod
+    def validate_districts(district_ids):
+        district_ids = set(district_ids or [])
+        if not district_ids:
+            raise ValidationError("At least one District is required")
+
+        valid_ids = set(
+            Location.objects.filter(
+                id__in=district_ids,
+                type="R",
+                validity_to__isnull=True,
+            ).values_list("id", flat=True)
+        )
+        if valid_ids != district_ids:
+            raise ValidationError(
+                "Every selected District must be an active location of type R"
+            )
+        return valid_ids
+
+    @transaction.atomic
+    @register_service_signal("catchment_service.update_or_create")
+    def update_or_create(self, data):
+        district_ids = self.validate_districts(data.pop("district_ids", []))
+        catchment_uuid = data.pop("uuid", None)
+        self.check_unique_code(data["code"], exclude_uuid=catchment_uuid)
+
+        if catchment_uuid:
+            catchment = Catchment.objects.select_for_update().get(
+                uuid=catchment_uuid,
+                validity_to__isnull=True,
+            )
+            catchment.save_history()
+            catchment.code = data["code"]
+            catchment.name = data["name"]
+            catchment.audit_user_id = self.user.id_for_audit
+            catchment.validity_from = data["validity_from"]
+            catchment.save()
+        else:
+            catchment = Catchment.objects.create(**data)
+
+        now = data["validity_from"]
+        active_links = catchment.district_links.filter(validity_to__isnull=True)
+
+        active_links.exclude(location_id__in=district_ids).update(
+            validity_to=now,
+            audit_user_id=self.user.id_for_audit,
+        )
+
+        existing_ids = set(
+            active_links.filter(location_id__in=district_ids).values_list(
+                "location_id", flat=True
+            )
+        )
+        CatchmentDistrict.objects.bulk_create(
+            [
+                CatchmentDistrict(
+                    catchment=catchment,
+                    location_id=district_id,
+                    audit_user_id=self.user.id_for_audit,
+                    validity_from=now,
+                )
+                for district_id in district_ids - existing_ids
+            ]
+        )
+        return catchment
+
+    @transaction.atomic
+    def delete(self, catchment_uuid):
+        from core.utils import TimeUtils
+
+        now = TimeUtils.now()
+        catchment = Catchment.objects.select_for_update().get(
+            uuid=catchment_uuid,
+            validity_to__isnull=True,
+        )
+        catchment.district_links.filter(validity_to__isnull=True).update(
+            validity_to=now,
+            audit_user_id=self.user.id_for_audit,
+        )
+        catchment.validity_to = now
+        catchment.audit_user_id = self.user.id_for_audit
+        catchment.save(update_fields=["validity_to", "audit_user_id"])
