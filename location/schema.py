@@ -239,27 +239,31 @@ class Query(graphene.ObjectType):
         ]
 
     def resolve_officer_locations(self, info, **kwargs):
-        if not info.context.user.has_perms(LocationConfig.gql_query_locations_perms):
+        if not info.context.user.has_perms(
+            LocationConfig.gql_query_locations_perms
+        ):
             raise PermissionDenied(_("unauthorized"))
+
         current_officer = Officer.objects.get(
-            code=kwargs["officer_code"], validity_to__isnull=True
+            code=kwargs["officer_code"],
+            validity_to__isnull=True,
         )
+        if "location_type" in kwargs:
+            return current_officer.officer_allowed_locations.filter(
+                type=kwargs["location_type"]
+            )
+    return current_officer.officer_allowed_locations
 
     def resolve_micro_catchments(self, info, **kwargs):
         show_history = kwargs.get("showHistory", False)
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
-        
+
         query = MicroCatchment.get_queryset(None, info.context.user)
         if not show_history:
             query = query.filter(validity_to__isnull=True)
-        
+
         return gql_optimizer.query(query.all(), info)
-        if "location_type" in kwargs:
-            return current_officer.officer_allowed_locations.filter(
-                type=kwargs["location_type"]
-            )
-        return current_officer.officer_allowed_locations
 
     def resolve_catchments(self, info, **kwargs):
         if not info.context.user.has_perms(LocationConfig.gql_query_catchments_perms):
