@@ -718,6 +718,7 @@ class DeleteHotspotMutation(OpenIMISMutation):
                 }
             ]
 
+
 class CatchmentInputType(OpenIMISMutation.Input):
     id = graphene.Int(required=False, read_only=True)
     uuid = graphene.String(required=False)

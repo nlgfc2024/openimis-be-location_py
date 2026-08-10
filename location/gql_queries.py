@@ -284,6 +284,7 @@ class MicroCatchmentGQLType(DjangoObjectType):
     def get_queryset(cls, queryset, info):
         return MicroCatchment.get_queryset(queryset, info.context.user)
 
+
 class CatchmentDistrictGQLType(DjangoObjectType):
     class Meta:
         model = CatchmentDistrict

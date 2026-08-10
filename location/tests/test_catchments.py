@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.test import TestCase
 
-from location.models import Catchment, CatchmentDistrict, Location
+from location.models import CatchmentDistrict, Location
 from location.services import CatchmentService
 
 

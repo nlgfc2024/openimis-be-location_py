@@ -966,6 +966,7 @@ class CatchmentDistrict(core_models.VersionedModel):
             ),
         ]
 
+
 class LocationMutation(core_models.UUIDModel):
     location = models.ForeignKey(Location, models.DO_NOTHING, related_name="mutations")
     mutation = models.ForeignKey(

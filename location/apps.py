@@ -40,6 +40,7 @@ DEFAULT_CFG = {
     "health_facility_contract_dates_mandatory": False,
 }
 
+
 class LocationConfig(AppConfig):
     name = MODULE_NAME
 
