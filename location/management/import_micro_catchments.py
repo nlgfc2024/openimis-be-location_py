@@ -93,7 +93,7 @@ def run_import(excel_path: str, audit_user_id: int, dry_run: bool = False):
         print("ERROR: pandas and openpyxl are required. Install with: pip install pandas openpyxl")
         sys.exit(1)
 
-    from location.models import Location, MicroCatchment, MicroCatchmentTA, MicroCatchmentGVH
+    from location.models import MicroCatchment, MicroCatchmentTA, MicroCatchmentGVH
     from core.utils import TimeUtils
 
     df = pd.read_excel(excel_path)

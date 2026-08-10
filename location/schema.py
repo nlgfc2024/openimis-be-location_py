@@ -21,6 +21,9 @@ from location.gql_mutations import (
     UpdateHotspotMutation,
     DeleteHotspotMutation,
     get_hotspot_eligible_villages,
+    CreateCatchmentMutation,
+    UpdateCatchmentMutation,
+    DeleteCatchmentMutation,
 )
 from location.gql_queries import (
     UserDistrictGQLType,
@@ -28,6 +31,8 @@ from location.gql_queries import (
     HealthFacilityGQLType,
     MicroCatchmentGQLType,
     HotspotGQLType,
+    CatchmentGQLType,
+
 )
 from location.models import (
     HealthFacility,
@@ -38,6 +43,7 @@ from location.models import (
     HealthFacilityMutation,
     MicroCatchment,
     Hotspot,
+    Catchment,
 )
 from location.services import LocationService, HealthFacilityService
 from location.apps import LocationConfig
@@ -104,6 +110,13 @@ class Query(graphene.ObjectType):
         hotspot_uuid=graphene.String(required=False),
         description="Villages selectable for a hotspot in the given micro-catchment "
         "(villages under the micro-catchment's GVHs).",
+    )
+    catchments = OrderedDjangoFilterConnectionField(
+        CatchmentGQLType,
+        search=graphene.String(),
+        district_uuid=graphene.String(),
+        showHistory=graphene.Boolean(),
+        orderBy=graphene.List(of_type=graphene.String),
     )
 
     def resolve_hotspot_eligible_villages(self, info, micro_catchment_uuid, hotspot_uuid=None, **kwargs):
@@ -226,27 +239,51 @@ class Query(graphene.ObjectType):
         ]
 
     def resolve_officer_locations(self, info, **kwargs):
-        if not info.context.user.has_perms(LocationConfig.gql_query_locations_perms):
+        if not info.context.user.has_perms(
+            LocationConfig.gql_query_locations_perms
+        ):
             raise PermissionDenied(_("unauthorized"))
-        current_officer = Officer.objects.get(
-            code=kwargs["officer_code"], validity_to__isnull=True
-        )
 
-    def resolve_micro_catchments(self, info, **kwargs):
-        show_history = kwargs.get("showHistory", False)
-        if info.context.user.is_anonymous:
-            raise PermissionDenied(_("unauthorized"))
-        
-        query = MicroCatchment.get_queryset(None, info.context.user)
-        if not show_history:
-            query = query.filter(validity_to__isnull=True)
-        
-        return gql_optimizer.query(query.all(), info)
+        current_officer = Officer.objects.get(
+            code=kwargs["officer_code"],
+            validity_to__isnull=True,
+        )
         if "location_type" in kwargs:
             return current_officer.officer_allowed_locations.filter(
                 type=kwargs["location_type"]
             )
         return current_officer.officer_allowed_locations
+
+    def resolve_micro_catchments(self, info, **kwargs):
+        show_history = kwargs.get("showHistory", False)
+        if info.context.user.is_anonymous:
+            raise PermissionDenied(_("unauthorized"))
+
+        query = MicroCatchment.get_queryset(None, info.context.user)
+        if not show_history:
+            query = query.filter(validity_to__isnull=True)
+
+        return gql_optimizer.query(query.all(), info)
+
+    def resolve_catchments(self, info, **kwargs):
+        if not info.context.user.has_perms(LocationConfig.gql_query_catchments_perms):
+            raise PermissionDenied(_("unauthorized"))
+
+        show_history = kwargs.get("showHistory", False)
+        search = kwargs.get("search")
+        district_uuid = kwargs.get("district_uuid")
+
+        query = Catchment.get_queryset(None, info.context.user)
+        if not show_history:
+            query = query.filter(validity_to__isnull=True)
+        if search:
+            query = query.filter(Q(code__icontains=search) | Q(name__icontains=search))
+        if district_uuid:
+            query = query.filter(
+                district_links__location__uuid=district_uuid,
+                district_links__validity_to__isnull=True,
+            )
+        return gql_optimizer.query(query.distinct(), info)
 
 
 class Mutation(graphene.ObjectType):
@@ -263,6 +300,9 @@ class Mutation(graphene.ObjectType):
     create_hotspot = CreateHotspotMutation.Field()
     update_hotspot = UpdateHotspotMutation.Field()
     delete_hotspot = DeleteHotspotMutation.Field()
+    create_catchment = CreateCatchmentMutation.Field()
+    update_catchment = UpdateCatchmentMutation.Field()
+    delete_catchment = DeleteCatchmentMutation.Field()
 
 
 def on_location_mutation(sender, **kwargs):
