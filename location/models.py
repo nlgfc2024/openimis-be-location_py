@@ -844,6 +844,13 @@ class MicroCatchment(core_models.VersionedModel):
     class Meta:
         managed = True
         db_table = "tblMicroCatchments"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["code"],
+                condition=Q(validity_to__isnull=True),
+                name="unique_active_micro_catchment_code",
+            ),
+        ]
 
     @classmethod
     def get_queryset(cls, queryset, user):
