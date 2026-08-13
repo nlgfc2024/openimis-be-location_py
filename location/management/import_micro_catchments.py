@@ -11,8 +11,6 @@ Expected Excel columns (case-insensitive, order does not matter):
   - district_code (required – must match an existing Location with type='D')
   - ta_codes      (optional – comma-separated Location codes with type='W')
   - gvh_codes     (optional – comma-separated Location codes with type='V')
-  - date_from     (optional – YYYY-MM-DD)
-  - date_to       (optional – YYYY-MM-DD)
 
 Usage
 -----
@@ -31,7 +29,6 @@ import argparse
 import os
 import sys
 import django
-from datetime import date
 
 
 def _setup_django():
@@ -68,22 +65,6 @@ def _parse_codes(cell_value):
     if not cell_value or str(cell_value).strip() in ("", "nan"):
         return []
     return [c.strip() for c in str(cell_value).split(",") if c.strip()]
-
-
-def _parse_date(cell_value):
-    if not cell_value or str(cell_value).strip() in ("", "nan"):
-        return None
-    if isinstance(cell_value, date):
-        return cell_value
-    try:
-        from datetime import datetime
-        return datetime.strptime(str(cell_value).strip(), "%Y-%m-%d").date()
-    except ValueError:
-        try:
-            import pandas as pd
-            return pd.to_datetime(cell_value).date()
-        except Exception:
-            return None
 
 
 def run_import(excel_path: str, audit_user_id: int, dry_run: bool = False):
@@ -146,8 +127,6 @@ def run_import(excel_path: str, audit_user_id: int, dry_run: bool = False):
                 gvh_objs.append(gvh)
 
         mc_type = str(row.get("type", "")).strip() or None
-        date_from = _parse_date(row.get("date_from"))
-        date_to = _parse_date(row.get("date_to"))
 
         if dry_run:
             print(
@@ -166,8 +145,6 @@ def run_import(excel_path: str, audit_user_id: int, dry_run: bool = False):
             existing.name = name
             existing.type = mc_type
             existing.district = district
-            existing.date_from = date_from
-            existing.date_to = date_to
             existing.audit_user_id = audit_user_id
             existing.validity_from = now
             existing.save()
@@ -180,8 +157,6 @@ def run_import(excel_path: str, audit_user_id: int, dry_run: bool = False):
                 name=name,
                 type=mc_type,
                 district=district,
-                date_from=date_from,
-                date_to=date_to,
                 audit_user_id=audit_user_id,
                 validity_from=now,
             )

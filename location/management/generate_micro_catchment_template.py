@@ -28,8 +28,6 @@ headers = [
     "district_code",
     "ta_codes",
     "gvh_codes",
-    "date_from",
-    "date_to",
 ]
 ws.append(headers)
 
@@ -41,8 +39,6 @@ ws.append([
     "D001",
     "W001,W002",
     "V001,V002,V003",
-    "2024-01-01",
-    "2026-12-31",
 ])
 
 # Column widths
