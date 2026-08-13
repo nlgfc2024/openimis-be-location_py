@@ -5,6 +5,7 @@ from core.schema import OpenIMISMutation
 from .models import Location, HealthFacility, UserDistrict, MicroCatchment, Hotspot, HotspotVillage
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError, PermissionDenied
+from django.db import transaction
 from django.utils.translation import gettext as _
 from graphene import InputObjectType
 
@@ -380,12 +381,10 @@ class DeleteHealthFacilityMutation(OpenIMISMutation):
 class MicroCatchmentInputType(OpenIMISMutation.Input):
     id = graphene.Int(required=False, read_only=True)
     uuid = graphene.String(required=False)
-    code = graphene.String(required=True)
+    code = graphene.String(required=False)
     name = graphene.String(required=True)
     type = graphene.String(required=False)
     district_id = graphene.Int(required=False)
-    date_from = graphene.Date(required=False)
-    date_to = graphene.Date(required=False)
     ta_ids = graphene.List(graphene.Int, required=False)
     gvh_ids = graphene.List(graphene.Int, required=False)
 
@@ -408,8 +407,6 @@ class CreateMicroCatchmentMutation(OpenIMISMutation):
     @classmethod
     def async_mutate(cls, user, **data):
         try:
-            if MicroCatchmentService.check_unique_code(data.get("code")):
-                raise ValidationError(_("mutation.micro_catchment_code_duplicated"))
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
             # TODO: Add proper permission check when permission is defined
@@ -447,12 +444,6 @@ class UpdateMicroCatchmentMutation(OpenIMISMutation):
             # TODO: Add proper permission check when permission is defined
             # if not user.has_perms(LocationConfig.gql_mutation_edit_micro_catchments_perms):
             #     raise PermissionDenied(_("unauthorized"))
-
-            incoming_code = data["code"]
-            current_mc = MicroCatchment.objects.get(uuid=data["uuid"])
-            if current_mc.code != incoming_code:
-                if MicroCatchmentService.check_unique_code(incoming_code):
-                    raise ValidationError(_("mutation.micro_catchment_code_duplicated"))
 
             data["audit_user_id"] = user.id_for_audit
             from core.utils import TimeUtils
@@ -509,7 +500,7 @@ class DeleteMicroCatchmentMutation(OpenIMISMutation):
 class HotspotInputType(OpenIMISMutation.Input):
     id = graphene.Int(required=False, read_only=True)
     uuid = graphene.String(required=False)
-    code = graphene.String(required=True)
+    code = graphene.String(required=False)
     name = graphene.String(required=True)
     description = graphene.String(required=False)
     micro_catchment_uuid = graphene.String(required=True)
@@ -543,6 +534,7 @@ def get_hotspot_eligible_villages(micro_catchment, hotspot=None):
     )
 
 
+@transaction.atomic
 def update_or_create_hotspot(data, user):
     if "client_mutation_id" in data:
         data.pop("client_mutation_id")
@@ -558,7 +550,7 @@ def update_or_create_hotspot(data, user):
         raise ValidationError(_("location.mutation.hotspot_villages_required"))
 
     try:
-        micro_catchment = MicroCatchment.objects.get(
+        micro_catchment = MicroCatchment.objects.select_for_update().get(
             uuid=micro_catchment_uuid, validity_to__isnull=True
         )
     except MicroCatchment.DoesNotExist:
@@ -591,8 +583,20 @@ def update_or_create_hotspot(data, user):
     data["micro_catchment"] = micro_catchment
 
     if not data.get("uuid"):
+        prefix = micro_catchment.code
+        next_number = 1
+        for existing_code in Hotspot.objects.filter(
+            micro_catchment=micro_catchment,
+            code__startswith=prefix
+        ).values_list("code", flat=True):
+            suffix = existing_code[len(prefix):]
+            if suffix.isdigit():
+                next_number = max(next_number, int(suffix) + 1)
+        data["code"] = f"{prefix}{next_number:02d}"
         hotspot = Hotspot.objects.create(**data)
     else:
+        # Moving or editing a hotspot must not rewrite its identifier.
+        data.pop("code", None)
         hotspot = Hotspot.objects.get(uuid=data["uuid"])
         for field, value in data.items():
             setattr(hotspot, field, value)

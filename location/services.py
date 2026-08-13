@@ -5,6 +5,7 @@ from uuid import UUID
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import transaction
 from django.db.models import Q
 from django.utils.translation import gettext as _
 
@@ -312,6 +313,7 @@ class MicroCatchmentService:
             raise ValidationError("GVHs must belong to selected Traditional Authorities")
 
     @register_service_signal("micro_catchment_service.update_or_create")
+    @transaction.atomic
     def update_or_create(self, data):
         ta_ids = data.pop("ta_ids", []) or []
         gvh_ids = data.pop("gvh_ids", []) or []
@@ -320,10 +322,28 @@ class MicroCatchmentService:
         self._validate_micro_catchment_relations(data, ta_ids, gvh_ids)
 
         if micro_catchment_uuid:
+            # Codes identify their original hierarchy and are immutable.
+            data.pop("code", None)
             micro_catchment = MicroCatchment.objects.get(uuid=micro_catchment_uuid)
             micro_catchment.save_history()
             [setattr(micro_catchment, key, data[key]) for key in data]
         else:
+            # The first selected TA owns the code. Locking it serializes code
+            # allocation when multiple requests create under the same TA.
+            primary_ta = Location.objects.select_for_update().get(id=ta_ids[0])
+            prefix = primary_ta.code
+            if not prefix:
+                raise ValidationError("The primary Traditional Authority must have a code")
+
+            next_number = 1
+            for existing_code in MicroCatchment.objects.filter(
+                traditional_authorities__location=primary_ta,
+                code__startswith=prefix,
+            ).values_list("code", flat=True).distinct():
+                suffix = existing_code[len(prefix):]
+                if suffix.isdigit():
+                    next_number = max(next_number, int(suffix) + 1)
+            data["code"] = f"{prefix}{next_number:02d}"
             micro_catchment = MicroCatchment.objects.create(**data)
 
         micro_catchment.save()
