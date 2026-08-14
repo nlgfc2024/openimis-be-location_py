@@ -9,7 +9,7 @@ from openpyxl.utils import get_column_letter
 
 from core.utils import TimeUtils
 
-from .models import Location, MicroCatchment
+from .models import Location, MicroCatchment, MicroCatchmentGVH
 from .services import MicroCatchmentService
 
 
@@ -362,15 +362,14 @@ def import_records(records, district, user):
             )
 
         gvh_ids = [location.id for location in record["gvhs"]]
-        conflicting_gvhs = (
-            Location.objects.filter(
-                id__in=gvh_ids,
-                micro_catchments_gvh__validity_to__isnull=True,
-                micro_catchments_gvh__micro_catchment__validity_to__isnull=True,
-            )
-            .distinct()
-            .order_by("code")
-        )
+        conflicting_gvh_ids = MicroCatchmentGVH.objects.filter(
+            location_id__in=gvh_ids,
+            validity_to__isnull=True,
+            micro_catchment__validity_to__isnull=True,
+        ).values_list("location_id", flat=True)
+        conflicting_gvhs = Location.objects.filter(
+            id__in=conflicting_gvh_ids,
+        ).order_by("code")
         if conflicting_gvhs.exists():
             conflict_labels = ", ".join(
                 f"{gvh.code} - {gvh.name}" for gvh in conflicting_gvhs
