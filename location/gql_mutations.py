@@ -586,7 +586,6 @@ def update_or_create_hotspot(data, user):
         prefix = micro_catchment.code
         next_number = 1
         for existing_code in Hotspot.objects.filter(
-            micro_catchment=micro_catchment,
             code__startswith=prefix
         ).values_list("code", flat=True):
             suffix = existing_code[len(prefix):]

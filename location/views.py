@@ -91,9 +91,9 @@ def import_micro_catchments(request):
             raise ValidationError("An .xlsx or .csv file is required.")
         filename = uploaded_file.name.lower()
         if filename.endswith(".xlsx"):
-            result = import_excel(uploaded_file, district, request.user.id_for_audit)
+            result = import_excel(uploaded_file, district, request.user)
         elif filename.endswith(".csv"):
-            result = import_csv(uploaded_file, district, request.user.id_for_audit)
+            result = import_csv(uploaded_file, district, request.user)
         else:
             raise ValidationError("Only .xlsx and .csv files are supported.")
         return Response({"success": True, **result})

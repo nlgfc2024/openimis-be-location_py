@@ -1,6 +1,5 @@
 import csv
 from io import BytesIO, StringIO
-from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -10,7 +9,7 @@ from openpyxl.utils import get_column_letter
 
 from core.utils import TimeUtils
 
-from .models import Location, MicroCatchment, MicroCatchmentGVH, MicroCatchmentTA
+from .models import Location, MicroCatchment
 from .services import MicroCatchmentService
 
 
@@ -247,12 +246,12 @@ def parse_workbook(uploaded_file, district):
 
 
 @transaction.atomic
-def import_workbook(uploaded_file, district, audit_user_id):
+def import_workbook(uploaded_file, district, user):
     records = parse_workbook(uploaded_file, district)
-    return import_records(records, district, audit_user_id)
+    return import_records(records, district, user)
 
 
-def import_csv(uploaded_file, district, audit_user_id):
+def import_csv(uploaded_file, district, user):
     try:
         content = uploaded_file.read().decode("utf-8-sig")
         reader = csv.DictReader(StringIO(content))
@@ -326,10 +325,10 @@ def import_csv(uploaded_file, district, audit_user_id):
         }
         for values in grouped.values()
     ]
-    return import_records(records, district, audit_user_id)
+    return import_records(records, district, user)
 
 
-def import_excel(uploaded_file, district, audit_user_id):
+def import_excel(uploaded_file, district, user):
     try:
         workbook = load_workbook(uploaded_file, data_only=True, read_only=True)
         sheet = workbook["MicroCatchments"]
@@ -345,21 +344,59 @@ def import_excel(uploaded_file, district, audit_user_id):
         for row in sheet.iter_rows(values_only=True):
             writer.writerow(row)
         converted = BytesIO(output.getvalue().encode("utf-8-sig"))
-        return import_csv(converted, district, audit_user_id)
-    return import_workbook(uploaded_file, district, audit_user_id)
+        return import_csv(converted, district, user)
+    return import_workbook(uploaded_file, district, user)
 
 
 @transaction.atomic
-def import_records(records, district, audit_user_id):
+def import_records(records, district, user):
+    validation_errors = []
+    for record in records:
+        name = record["name"].strip()
+        if MicroCatchment.objects.filter(
+            name__iexact=name,
+            validity_to__isnull=True,
+        ).exists():
+            validation_errors.append(
+                f"Micro-catchment name '{name}' already exists."
+            )
+
+        gvh_ids = [location.id for location in record["gvhs"]]
+        conflicting_gvhs = (
+            Location.objects.filter(
+                id__in=gvh_ids,
+                micro_catchments_gvh__validity_to__isnull=True,
+                micro_catchments_gvh__micro_catchment__validity_to__isnull=True,
+            )
+            .distinct()
+            .order_by("code")
+        )
+        if conflicting_gvhs.exists():
+            conflict_labels = ", ".join(
+                f"{gvh.code} - {gvh.name}" for gvh in conflicting_gvhs
+            )
+            validation_errors.append(
+                f"Micro-catchment '{name}' contains GVH(s) already assigned to another "
+                f"micro-catchment: {conflict_labels}."
+            )
+
+    if validation_errors:
+        raise ValidationError(validation_errors)
+
     created = 0
-    service = MicroCatchmentService(SimpleNamespace(id_for_audit=audit_user_id))
+    service = MicroCatchmentService(user)
+    audit_user_id = user.id_for_audit
 
     for record in records:
-        tas = record.pop("tas")
-        gvhs = record.pop("gvhs")
+        tas = record["tas"]
+        gvhs = record["gvhs"]
         service.update_or_create(
             {
-                **record,
+                **{
+                    key: value
+                    for key, value in record.items()
+                    if key not in ("tas", "gvhs")
+                },
                 "district_id": district.id,
                 "ta_ids": [location.id for location in tas],
                 "gvh_ids": [location.id for location in gvhs],
@@ -370,24 +407,3 @@ def import_records(records, district, audit_user_id):
         created += 1
 
     return {"created": created, "updated": 0, "total": len(records)}
-
-
-def _sync_links(catchment, locations, model, related_name, audit_user_id, now):
-    location_ids = {location.id for location in locations}
-    related = getattr(catchment, related_name)
-    related.filter(validity_to__isnull=True).exclude(location_id__in=location_ids).update(validity_to=now)
-    existing = set(
-        related.filter(validity_to__isnull=True).values_list("location_id", flat=True)
-    )
-    model.objects.bulk_create(
-        [
-            model(
-                micro_catchment=catchment,
-                location=location,
-                audit_user_id=audit_user_id,
-                validity_from=now,
-            )
-            for location in locations
-            if location.id not in existing
-        ]
-    )

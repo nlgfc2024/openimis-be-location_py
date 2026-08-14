@@ -258,16 +258,6 @@ class MicroCatchmentService:
     def __init__(self, user):
         self.user = user
 
-    @staticmethod
-    def check_unique_code(code):
-        if MicroCatchment.objects.filter(code=code, validity_to__isnull=True).exists():
-            return [{"message": "Micro Catchment code %s already exists" % code}]
-        return []
-
-    def validate_data(self, **data):
-        error = self.check_unique_code(data["code"])
-        return error
-
     def _validate_micro_catchment_relations(self, data, ta_ids, gvh_ids):
         district_id = data.get("district_id")
         if not district_id:
@@ -321,6 +311,19 @@ class MicroCatchmentService:
 
         self._validate_micro_catchment_relations(data, ta_ids, gvh_ids)
 
+        name = (data.get("name") or "").strip()
+        duplicate_name = MicroCatchment.objects.filter(
+            name__iexact=name,
+            validity_to__isnull=True,
+        )
+        if micro_catchment_uuid:
+            duplicate_name = duplicate_name.exclude(uuid=micro_catchment_uuid)
+        if duplicate_name.exists():
+            raise ValidationError(
+                f"Micro-catchment name '{name}' already exists."
+            )
+        data["name"] = name
+
         if micro_catchment_uuid:
             # Codes identify their original hierarchy and are immutable.
             data.pop("code", None)
@@ -337,9 +340,8 @@ class MicroCatchmentService:
 
             next_number = 1
             for existing_code in MicroCatchment.objects.filter(
-                traditional_authorities__location=primary_ta,
                 code__startswith=prefix,
-            ).values_list("code", flat=True).distinct():
+            ).values_list("code", flat=True):
                 suffix = existing_code[len(prefix):]
                 if suffix.isdigit():
                     next_number = max(next_number, int(suffix) + 1)
