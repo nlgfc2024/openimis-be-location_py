@@ -110,14 +110,14 @@ class Query(graphene.ObjectType):
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
         try:
-            micro_catchment = MicroCatchment.objects.get(
+            micro_catchment = MicroCatchment.get_queryset(None, info.context.user).get(
                 uuid=micro_catchment_uuid, validity_to__isnull=True
             )
         except MicroCatchment.DoesNotExist:
             return []
         hotspot = None
         if hotspot_uuid:
-            hotspot = Hotspot.objects.filter(
+            hotspot = Hotspot.get_queryset(None, info.context.user).filter(
                 uuid=hotspot_uuid, validity_to__isnull=True
             ).first()
         return get_hotspot_eligible_villages(micro_catchment, hotspot).order_by("code")
@@ -171,7 +171,9 @@ class Query(graphene.ObjectType):
     def resolve_locations_all(self, info, **kwargs):
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
-        return Location.objects.filter(*Location.filter_validity()).all()
+        return Location.get_queryset(None, info.context.user).filter(
+            *Location.filter_validity()
+        )
 
     def resolve_locations_str(self, info, **kwargs):
         if info.context.user.is_anonymous:

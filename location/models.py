@@ -18,6 +18,35 @@ logger = logging.getLogger(__file__)
 cache = caches["location"]
 
 
+def allowed_micro_catchment_district_ids(user):
+    """Return allowed Malawi district (R) IDs, or None when unrestricted."""
+    if isinstance(user, ResolveInfo):
+        user = user.context.user
+    if (
+        not settings.ROW_SECURITY
+        or LocationConfig.no_location_check
+        or getattr(user, "is_superuser", False)
+    ):
+        return None
+    if getattr(user, "is_anonymous", True):
+        return set()
+
+    interactive_user = getattr(user, "_u", user)
+    if not isinstance(interactive_user, core_models.InteractiveUser):
+        return set()
+
+    assignments = UserDistrict.objects.filter(
+        user=interactive_user,
+        validity_to__isnull=True,
+        location__validity_to__isnull=True,
+    ).values_list("location__type", "location_id", "location__parent_id")
+    return {
+        location_id if location_type == "R" else parent_id
+        for location_type, location_id, parent_id in assignments
+        if location_type == "R" or (location_type == "D" and parent_id)
+    }
+
+
 def free_cache_for_user(user_id="*"):
     # wildcard only supported for Redis
     if user_id == "*" and not isinstance(cache, RedisCache):
@@ -389,12 +418,10 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
         if settings.ROW_SECURITY and user.is_anonymous:
             return queryset.filter(id=-1)
 
-        # OMT-280: if you create a new region and your user has district limitations, you won't find what you
-        # just created. So we'll consider that if you were allowed to create it, you are also allowed to retrieve it.
         if (
-            settings.ROW_SECURITY and not user.has_perms(
-                LocationConfig.gql_mutation_create_region_locations_perms
-            ) and not user.is_superuser
+            settings.ROW_SECURITY
+            and not LocationConfig.no_location_check
+            and not user.is_superuser
         ):
             if user.is_officer:
                 from core.models import Officer
@@ -416,8 +443,6 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
                     .get()
                     .officer_allowed_locations
                 )
-            elif user.is_superuser:
-                return Location.objects
             else:
                 return cls.objects.allowed(user.i_user_id, qs=True, strict=False)
         return queryset
@@ -478,6 +503,9 @@ class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
             queryset = cls.objects.filter(*cls.filter_validity())
         if settings.ROW_SECURITY and user.is_anonymous:
             return queryset.filter(id=-1)
+        district_ids = allowed_micro_catchment_district_ids(user)
+        if district_ids is not None:
+            return queryset.filter(micro_catchment__district_id__in=district_ids)
         return queryset
 
 
@@ -859,8 +887,9 @@ class MicroCatchment(core_models.VersionedModel):
             user = user.context.user
         if settings.ROW_SECURITY and user.is_anonymous:
             return queryset.filter(id=-1)
-        if settings.ROW_SECURITY:
-            pass
+        district_ids = allowed_micro_catchment_district_ids(user)
+        if district_ids is not None:
+            return queryset.filter(district_id__in=district_ids)
         return queryset
 
 

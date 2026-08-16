@@ -10,7 +10,7 @@ from core.views import check_user_rights
 
 from .apps import LocationConfig
 from .micro_catchment_workbook import build_template_workbook, build_workbook, import_csv, import_excel
-from .models import Location, UserDistrict
+from .models import Location, allowed_micro_catchment_district_ids
 
 
 logger = logging.getLogger(__name__)
@@ -26,19 +26,8 @@ def _district_for_user(request):
     if not district:
         raise ValidationError("District not found.")
 
-    # UserDistrict assignments still point to level-D locations (Traditional
-    # Authorities in the Malawi hierarchy). Export/import operates on the
-    # top-level R location stored by MicroCatchment.district, so authorize the
-    # selected District through the assigned location's parent.
-    allowed_ids = set()
-    for user_district in UserDistrict.get_user_districts(request.user):
-        assigned_location = user_district.location
-        if assigned_location.type == "R":
-            allowed_ids.add(assigned_location.id)
-        elif assigned_location.parent_id:
-            allowed_ids.add(assigned_location.parent_id)
-
-    if district.id not in allowed_ids:
+    allowed_ids = allowed_micro_catchment_district_ids(request.user)
+    if allowed_ids is not None and district.id not in allowed_ids:
         from django.core.exceptions import PermissionDenied
 
         raise PermissionDenied("You are not assigned to this district.")
