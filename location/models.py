@@ -905,6 +905,68 @@ class MicroCatchmentGVH(core_models.VersionedModel):
         db_table = "tblMicroCatchmentGVH"
 
 
+class Catchment(core_models.VersionedModel):
+    id = models.AutoField(db_column="CatchmentId", primary_key=True)
+    uuid = models.CharField(
+        db_column="CatchmentUUID",
+        max_length=36,
+        default=uuid.uuid4,
+        unique=True,
+    )
+    code = models.CharField(db_column="Code", max_length=50)
+    name = models.CharField(db_column="Name", max_length=255)
+    audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    class Meta:
+        managed = True
+        db_table = "tblCatchments"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("code",),
+                condition=Q(validity_to__isnull=True),
+                name="location_unique_active_catchment_code",
+            ),
+        ]
+
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        queryset = queryset if queryset is not None else cls.objects
+        if isinstance(user, ResolveInfo):
+            user = user.context.user
+        if settings.ROW_SECURITY and user.is_anonymous:
+            return queryset.filter(id=-1)
+        return queryset
+
+
+class CatchmentDistrict(core_models.VersionedModel):
+    id = models.AutoField(db_column="CatchmentDistrictId", primary_key=True)
+    catchment = models.ForeignKey(
+        Catchment,
+        models.CASCADE,
+        db_column="CatchmentId",
+        related_name="district_links",
+    )
+    location = models.ForeignKey(
+        Location,
+        models.CASCADE,
+        db_column="LocationId",
+        related_name="catchment_links",
+        limit_choices_to={"type": "R"},
+    )
+    audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    class Meta:
+        managed = True
+        db_table = "tblCatchmentDistricts"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("catchment", "location"),
+                condition=Q(validity_to__isnull=True),
+                name="location_unique_active_catchment_district",
+            ),
+        ]
+
+
 class LocationMutation(core_models.UUIDModel):
     location = models.ForeignKey(Location, models.DO_NOTHING, related_name="mutations")
     mutation = models.ForeignKey(

@@ -18,6 +18,8 @@ from location.models import (
     MicroCatchmentTA,
     MicroCatchmentGVH,
     Hotspot,
+    Catchment,
+    CatchmentDistrict,
 )
 from django.db.models import Field
 
@@ -281,3 +283,42 @@ class MicroCatchmentGQLType(DjangoObjectType):
     @classmethod
     def get_queryset(cls, queryset, info):
         return MicroCatchment.get_queryset(queryset, info.context.user)
+
+
+class CatchmentDistrictGQLType(DjangoObjectType):
+    class Meta:
+        model = CatchmentDistrict
+        filter_fields = {
+            "id": ["exact"],
+            "catchment": ["exact"],
+            "location": ["exact"],
+        }
+
+
+class CatchmentGQLType(DjangoObjectType):
+    districts = graphene.List(LocationGQLType)
+
+    class Meta:
+        model = Catchment
+        interfaces = (graphene.relay.Node,)
+        filter_fields = {
+            "id": ["exact"],
+            "uuid": ["exact", "in"],
+            "code": ["exact", "iexact", "icontains", "istartswith"],
+            "name": ["exact", "iexact", "icontains", "istartswith"],
+        }
+        connection_class = ExtendedConnection
+
+    def resolve_districts(self, info):
+        if not info.context.user.is_authenticated:
+            raise PermissionDenied(_("unauthorized"))
+        return Location.objects.filter(
+            catchment_links__catchment=self,
+            catchment_links__validity_to__isnull=True,
+            type="R",
+            validity_to__isnull=True,
+        ).order_by("code")
+
+    @classmethod
+    def get_queryset(cls, queryset, info):
+        return Catchment.get_queryset(queryset, info.context.user)

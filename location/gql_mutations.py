@@ -2,7 +2,14 @@ import graphene
 from .apps import LocationConfig
 from core import assert_string_length
 from core.schema import OpenIMISMutation
-from .models import Location, HealthFacility, UserDistrict, MicroCatchment, Hotspot, HotspotVillage
+from .models import (
+    Location,
+    HealthFacility,
+    UserDistrict,
+    MicroCatchment,
+    Hotspot,
+    HotspotVillage,
+)
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError, PermissionDenied
 from django.utils.translation import gettext as _
@@ -10,7 +17,7 @@ from graphene import InputObjectType
 
 import copy
 
-from .services import LocationService, HealthFacilityService, MicroCatchmentService
+from .services import LocationService, HealthFacilityService, MicroCatchmentService, CatchmentService
 
 
 class LocationInputType(OpenIMISMutation.Input):
@@ -516,7 +523,7 @@ class HotspotInputType(OpenIMISMutation.Input):
     village_uuids = graphene.List(graphene.String, required=True)
 
 
-def get_hotspot_eligible_villages(micro_catchment):
+def get_hotspot_eligible_villages(micro_catchment, hotspot=None):
     """
     Villages (Location type V) that can be attached to a hotspot for the given
     micro-catchment: those whose parent GVH (Location type W under the Malawi
@@ -527,10 +534,19 @@ def get_hotspot_eligible_villages(micro_catchment):
         micro_catchments_gvh__micro_catchment=micro_catchment,
         micro_catchments_gvh__validity_to__isnull=True,
     )
-    return Location.objects.filter(
+    villages = Location.objects.filter(
         *Location.filter_validity(),
         type="V",
         parent__in=gvh_locations,
+    )
+    assigned_villages = HotspotVillage.objects.filter(
+        validity_to__isnull=True,
+        hotspot__validity_to__isnull=True,
+    )
+    if hotspot:
+        assigned_villages = assigned_villages.exclude(hotspot=hotspot)
+    return villages.exclude(
+        id__in=assigned_villages.values_list("location_id", flat=True)
     )
 
 
@@ -555,7 +571,12 @@ def update_or_create_hotspot(data, user):
     except MicroCatchment.DoesNotExist:
         raise ValidationError(_("location.mutation.hotspot_micro_catchment_required"))
 
-    eligible_villages = get_hotspot_eligible_villages(micro_catchment)
+    current_hotspot = None
+    if data.get("uuid"):
+        current_hotspot = Hotspot.objects.filter(
+            uuid=data["uuid"], validity_to__isnull=True
+        ).first()
+    eligible_villages = get_hotspot_eligible_villages(micro_catchment, current_hotspot)
     villages = list(eligible_villages.filter(uuid__in=village_uuids))
     if len(villages) != len(village_uuids):
         raise ValidationError(_("location.mutation.hotspot_invalid_villages"))
@@ -696,3 +717,108 @@ class DeleteHotspotMutation(OpenIMISMutation):
                     "detail": str(exc),
                 }
             ]
+
+
+class CatchmentInputType(OpenIMISMutation.Input):
+    id = graphene.Int(required=False, read_only=True)
+    uuid = graphene.String(required=False)
+    code = graphene.String(required=True)
+    name = graphene.String(required=True)
+    district_ids = graphene.List(graphene.NonNull(graphene.Int), required=True)
+
+
+def clean_catchment_mutation_data(data):
+    data.pop("client_mutation_id", None)
+    data.pop("client_mutation_label", None)
+    return data
+
+
+class CreateCatchmentMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "CreateCatchmentMutation"
+
+    class Input(CatchmentInputType):
+        pass
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            if not user.has_perms(
+                LocationConfig.gql_mutation_create_catchments_perms
+            ):
+                raise PermissionDenied(_("unauthorized"))
+
+            from core.utils import TimeUtils
+
+            data = clean_catchment_mutation_data(data)
+            data["audit_user_id"] = user.id_for_audit
+            data["validity_from"] = TimeUtils.now()
+            CatchmentService(user).update_or_create(data)
+            return None
+        except Exception as exc:
+            return [{
+                "message": _("location.mutation.failed_to_create_catchment")
+                % {"code": data.get("code", "unknown")},
+                "detail": str(exc),
+            }]
+
+
+class UpdateCatchmentMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "UpdateCatchmentMutation"
+
+    class Input(CatchmentInputType):
+        uuid = graphene.String(required=True)
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            if not user.has_perms(
+                LocationConfig.gql_mutation_edit_catchments_perms
+            ):
+                raise PermissionDenied(_("unauthorized"))
+
+            from core.utils import TimeUtils
+
+            data = clean_catchment_mutation_data(data)
+            data["audit_user_id"] = user.id_for_audit
+            data["validity_from"] = TimeUtils.now()
+            CatchmentService(user).update_or_create(data)
+            return None
+        except Exception as exc:
+            return [{
+                "message": _("location.mutation.failed_to_update_catchment")
+                % {"code": data.get("code", "unknown")},
+                "detail": str(exc),
+            }]
+
+
+class DeleteCatchmentMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "DeleteCatchmentMutation"
+
+    class Input(OpenIMISMutation.Input):
+        uuid = graphene.String(required=True)
+        code = graphene.String(required=True)
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            if not user.has_perms(
+                LocationConfig.gql_mutation_delete_catchments_perms
+            ):
+                raise PermissionDenied(_("unauthorized"))
+            CatchmentService(user).delete(data["uuid"])
+            return None
+        except Exception as exc:
+            return [{
+                "message": _("location.mutation.failed_to_delete_catchment")
+                % {"code": data.get("code", "unknown")},
+                "detail": str(exc),
+            }]
