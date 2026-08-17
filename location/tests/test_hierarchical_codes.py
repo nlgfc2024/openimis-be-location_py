@@ -13,7 +13,11 @@ from location.services import MicroCatchmentService
 
 class HierarchicalCodeGenerationTest(TestCase):
     def setUp(self):
-        self.user = SimpleNamespace(id_for_audit=-1)
+        self.user = SimpleNamespace(
+            id_for_audit=-1,
+            is_superuser=True,
+            is_anonymous=False,
+        )
         self.district = self._location("R", "DIST")
         self.ta = self._location("D", "2341", self.district)
         self.gvh = self._location("W", "GVH1", self.ta)
@@ -211,6 +215,52 @@ class HierarchicalCodeGenerationTest(TestCase):
         self.assertEqual(
             context.exception.messages,
             ["Micro-catchment name 'existing CATCHMENT' already exists."],
+        )
+
+    def test_same_micro_catchment_name_is_allowed_in_different_districts(self):
+        self._create_micro_catchment("Shared catchment")
+        other_district = self._location("R", "DIST2")
+        other_ta = self._location("D", "5678", other_district)
+        other_gvh = self._location("W", "GVH-DIST2", other_ta)
+
+        created = MicroCatchmentService(self.user).update_or_create(
+            {
+                "name": "shared CATCHMENT",
+                "district_id": other_district.id,
+                "ta_ids": [other_ta.id],
+                "gvh_ids": [other_gvh.id],
+                "audit_user_id": -1,
+            }
+        )
+
+        self.assertEqual(created.district, other_district)
+        self.assertEqual(created.code, "567801")
+
+    def test_import_name_check_is_scoped_to_selected_district(self):
+        self._create_micro_catchment("Shared import catchment")
+        other_district = self._location("R", "DIST3")
+        other_ta = self._location("D", "6789", other_district)
+        other_gvh = self._location("W", "GVH-DIST3", other_ta)
+
+        result = import_records(
+            [
+                {
+                    "name": "shared IMPORT catchment",
+                    "type": None,
+                    "tas": [other_ta],
+                    "gvhs": [other_gvh],
+                }
+            ],
+            other_district,
+            self.user,
+        )
+
+        self.assertEqual(result, {"created": 1, "updated": 0, "total": 1})
+        self.assertTrue(
+            MicroCatchment.objects.filter(
+                district=other_district,
+                name="shared IMPORT catchment",
+            ).exists()
         )
 
     def test_import_reports_only_gvhs_assigned_to_another_catchment(self):

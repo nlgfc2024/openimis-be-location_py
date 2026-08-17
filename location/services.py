@@ -319,6 +319,7 @@ class MicroCatchmentService:
         name = (data.get("name") or "").strip()
         duplicate_name = MicroCatchment.objects.filter(
             name__iexact=name,
+            district_id=data["district_id"],
             validity_to__isnull=True,
         )
         if micro_catchment_uuid:

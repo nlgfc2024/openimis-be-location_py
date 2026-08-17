@@ -355,6 +355,7 @@ def import_records(records, district, user):
         name = record["name"].strip()
         if MicroCatchment.objects.filter(
             name__iexact=name,
+            district=district,
             validity_to__isnull=True,
         ).exists():
             validation_errors.append(
