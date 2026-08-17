@@ -97,3 +97,12 @@ msgstr "Cannot update historical hf"
 #: location/gql_mutations.py:276 location/gql_mutations.py:315
 msgid "mutation.hf_code_duplicated"
 msgstr "Health facility code is duplicated"
+
+msgid "location.mutation.failed_to_create_catchment"
+msgstr "Failed to create Catchment %(code)s"
+
+msgid "location.mutation.failed_to_update_catchment"
+msgstr "Failed to update Catchment %(code)s"
+
+msgid "location.mutation.failed_to_delete_catchment"
+msgstr "Failed to delete Catchment %(code)s"
