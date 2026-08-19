@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from io import BytesIO
+from datetime import date
 
 from django.test import TestCase
 from django.core.exceptions import ValidationError
@@ -160,16 +161,24 @@ class HierarchicalCodeGenerationTest(TestCase):
         headers = [cell.value for cell in workbook["MicroCatchments"][1]]
 
         self.assertNotIn("micro_catchment_code", headers)
-        self.assertNotIn("start_date", headers)
-        self.assertNotIn("end_date", headers)
+        self.assertIn("start_date", headers)
+        self.assertIn("end_date", headers)
         self.assertIn("micro_catchment_name", headers)
 
-    def test_export_omits_micro_catchment_dates(self):
+    def test_export_includes_micro_catchment_dates(self):
+        catchment = self._create_micro_catchment("Dated catchment")
+        catchment.date_from = date(2026, 8, 1)
+        catchment.date_to = date(2026, 8, 31)
+        catchment.save(update_fields=["date_from", "date_to"])
         workbook = load_workbook(BytesIO(build_workbook(self.district)))
-        headers = [cell.value for cell in workbook["MicroCatchments"][1]]
+        sheet = workbook["MicroCatchments"]
+        headers = [cell.value for cell in sheet[1]]
+        values = dict(zip(headers, [cell.value for cell in sheet[2]]))
 
-        self.assertNotIn("date_from", headers)
-        self.assertNotIn("date_to", headers)
+        self.assertIn("date_from", headers)
+        self.assertIn("date_to", headers)
+        self.assertEqual(str(values["date_from"])[:10], "2026-08-01")
+        self.assertEqual(str(values["date_to"])[:10], "2026-08-31")
 
     def test_excel_import_generates_code_from_ta(self):
         content = build_template_workbook(self.district)
@@ -177,6 +186,8 @@ class HierarchicalCodeGenerationTest(TestCase):
         sheet = workbook["MicroCatchments"]
         headers = {cell.value: cell.column for cell in sheet[1]}
         sheet.cell(2, headers["micro_catchment_name"], "Imported catchment")
+        sheet.cell(2, headers["start_date"], "2026-08-01")
+        sheet.cell(2, headers["end_date"], "2026-08-31")
         uploaded = BytesIO()
         workbook.save(uploaded)
         uploaded.seek(0)
@@ -186,6 +197,25 @@ class HierarchicalCodeGenerationTest(TestCase):
         imported = MicroCatchment.objects.get(name="Imported catchment")
         self.assertEqual(result, {"created": 1, "updated": 0, "total": 1})
         self.assertEqual(imported.code, "234101")
+        self.assertEqual(imported.date_from, date(2026, 8, 1))
+        self.assertEqual(imported.date_to, date(2026, 8, 31))
+
+    def test_excel_import_rejects_end_date_before_start_date(self):
+        content = build_template_workbook(self.district)
+        workbook = load_workbook(BytesIO(content))
+        sheet = workbook["MicroCatchments"]
+        headers = {cell.value: cell.column for cell in sheet[1]}
+        sheet.cell(2, headers["micro_catchment_name"], "Invalid dates")
+        sheet.cell(2, headers["start_date"], "2026-08-31")
+        sheet.cell(2, headers["end_date"], "2026-08-01")
+        uploaded = BytesIO()
+        workbook.save(uploaded)
+        uploaded.seek(0)
+
+        with self.assertRaises(ValidationError) as context:
+            import_excel(uploaded, self.district, self.user)
+
+        self.assertIn("end_date cannot be before start_date", " ".join(context.exception.messages))
 
     def test_import_rejects_existing_micro_catchment_name(self):
         self._create_micro_catchment("Existing catchment")

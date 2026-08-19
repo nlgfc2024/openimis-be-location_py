@@ -392,6 +392,8 @@ class MicroCatchmentInputType(OpenIMISMutation.Input):
     name = graphene.String(required=True)
     type = graphene.String(required=False)
     district_id = graphene.Int(required=False)
+    date_from = graphene.Date(required=False)
+    date_to = graphene.Date(required=False)
     ta_ids = graphene.List(graphene.Int, required=False)
     gvh_ids = graphene.List(graphene.Int, required=False)
 

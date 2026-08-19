@@ -1,4 +1,5 @@
 import csv
+from datetime import date, datetime
 from io import BytesIO, StringIO
 
 from django.core.exceptions import ValidationError
@@ -21,6 +22,8 @@ CSV_HEADERS = (
     "gvh_code",
     "gvh_name",
     "micro_catchment_name",
+    "start_date",
+    "end_date",
 )
 
 
@@ -30,6 +33,8 @@ HEADERS = (
     "district_code",
     "ta_codes",
     "gvh_codes",
+    "date_from",
+    "date_to",
 )
 
 EXPORT_HEADERS = (
@@ -41,6 +46,8 @@ EXPORT_HEADERS = (
     "ta_name",
     "gvh_code",
     "gvh_name",
+    "date_from",
+    "date_to",
 )
 
 
@@ -63,13 +70,13 @@ def build_template_workbook(district):
         ).order_by("code")
         ta_has_gvhs = False
         for gvh in gvhs:
-            sheet.append((district.code, district.name, ta.code, ta.name, gvh.code, gvh.name, ""))
+            sheet.append((district.code, district.name, ta.code, ta.name, gvh.code, gvh.name, "", "", ""))
             rows_written = ta_has_gvhs = True
         if not ta_has_gvhs:
-            sheet.append((district.code, district.name, ta.code, ta.name, "", "", ""))
+            sheet.append((district.code, district.name, ta.code, ta.name, "", "", "", "", ""))
             rows_written = True
     if not rows_written:
-        sheet.append((district.code, district.name, "", "", "", "", ""))
+        sheet.append((district.code, district.name, "", "", "", "", "", "", ""))
     _format_sheet(sheet)
     output = BytesIO()
     workbook.save(output)
@@ -84,6 +91,21 @@ def _cell_text(value):
 
 def _codes(value):
     return [code.strip() for code in _cell_text(value).split(",") if code.strip()]
+
+
+def _date(value, field, row_number):
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return datetime.strptime(_cell_text(value), "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValidationError(
+            f"Row {row_number}: {field} must use YYYY-MM-DD format."
+        ) from exc
 
 
 def _format_sheet(sheet):
@@ -145,12 +167,14 @@ def build_workbook(district):
                     ta_name,
                     gvh_code,
                     gvh_name,
+                    catchment.date_from,
+                    catchment.date_to,
                 )
             )
 
     # Keep an immediately usable blank row when a district has no catchments yet.
     if sheet.max_row == 1:
-        sheet.append(("", "", "", district.code, "", "", "", ""))
+        sheet.append(("", "", "", district.code, "", "", "", "", "", ""))
 
     _format_sheet(sheet)
     output = BytesIO()
@@ -226,6 +250,15 @@ def parse_workbook(uploaded_file, district):
         if not gvh_codes:
             row_errors.append("at least one GVH code is required")
 
+        try:
+            date_from = _date(values["date_from"], "date_from", row_number)
+            date_to = _date(values["date_to"], "date_to", row_number)
+            if date_from and date_to and date_to < date_from:
+                row_errors.append("date_to cannot be before date_from")
+        except ValidationError as exc:
+            row_errors.extend(exc.messages)
+            date_from = date_to = None
+
         if row_errors:
             errors.append("Row %s: %s." % (row_number, "; ".join(row_errors)))
         else:
@@ -233,6 +266,8 @@ def parse_workbook(uploaded_file, district):
                 {
                     "name": name,
                     "type": _cell_text(values["type"]) or None,
+                    "date_from": date_from,
+                    "date_to": date_to,
                     "tas": tas,
                     "gvhs": gvhs,
                 }
@@ -296,16 +331,28 @@ def import_csv(uploaded_file, district, user):
             ).first()
             if not gvh:
                 row_errors.append(f"invalid GVH code: {gvh_code}")
+        try:
+            start_date = _date(values["start_date"], "start_date", row_number)
+            end_date = _date(values["end_date"], "end_date", row_number)
+            if start_date and end_date and end_date < start_date:
+                row_errors.append("end_date cannot be before start_date")
+        except ValidationError as exc:
+            row_errors.extend(exc.messages)
+            start_date = end_date = None
         if row_errors:
             errors.append("Row %s: %s." % (row_number, "; ".join(row_errors)))
             continue
 
         record = grouped.setdefault(
             name.casefold(),
-            {"name": name, "tas": [], "gvhs": []},
+            {"name": name, "tas": [], "gvhs": [], "start_date": start_date, "end_date": end_date},
         )
         if record["name"] != name:
             errors.append(f"Row {row_number}: micro_catchment_name is inconsistent across matching rows.")
+        elif record["start_date"] != start_date or record["end_date"] != end_date:
+            errors.append(
+                f"Row {row_number}: start_date or end_date is inconsistent across matching rows."
+            )
         elif ta.id not in {location.id for location in record["tas"]}:
             record["tas"].append(ta)
         if gvh and gvh.id not in {location.id for location in record["gvhs"]}:
@@ -320,6 +367,8 @@ def import_csv(uploaded_file, district, user):
         {
             "name": values["name"],
             "type": None,
+            "date_from": values["start_date"],
+            "date_to": values["end_date"],
             "tas": values["tas"],
             "gvhs": values["gvhs"],
         }
