@@ -10,7 +10,8 @@ from openpyxl.utils import get_column_letter
 
 from core.utils import TimeUtils
 
-from .models import Location, MicroCatchment, MicroCatchmentGVH, MicroCatchmentTA
+from .models import Location, MicroCatchment, MicroCatchmentGVH
+from .services import MicroCatchmentService
 
 
 CSV_HEADERS = (
@@ -20,7 +21,6 @@ CSV_HEADERS = (
     "ta_name",
     "gvh_code",
     "gvh_name",
-    "micro_catchment_code",
     "micro_catchment_name",
     "start_date",
     "end_date",
@@ -28,7 +28,6 @@ CSV_HEADERS = (
 
 
 HEADERS = (
-    "code",
     "name",
     "type",
     "district_code",
@@ -71,13 +70,13 @@ def build_template_workbook(district):
         ).order_by("code")
         ta_has_gvhs = False
         for gvh in gvhs:
-            sheet.append((district.code, district.name, ta.code, ta.name, gvh.code, gvh.name, "", "", "", ""))
+            sheet.append((district.code, district.name, ta.code, ta.name, gvh.code, gvh.name, "", "", ""))
             rows_written = ta_has_gvhs = True
         if not ta_has_gvhs:
-            sheet.append((district.code, district.name, ta.code, ta.name, "", "", "", "", "", ""))
+            sheet.append((district.code, district.name, ta.code, ta.name, "", "", "", "", ""))
             rows_written = True
     if not rows_written:
-        sheet.append((district.code, district.name, "", "", "", "", "", "", "", ""))
+        sheet.append((district.code, district.name, "", "", "", "", "", "", ""))
     _format_sheet(sheet)
     output = BytesIO()
     workbook.save(output)
@@ -205,25 +204,22 @@ def parse_workbook(uploaded_file, district):
     indexes = {header: supplied_headers.index(header) for header in HEADERS}
 
     parsed = []
-    seen_codes = set()
+    seen_names = set()
     errors = []
     for row_number, row in enumerate(rows, start=2):
         values = {header: row[index] if index < len(row) else None for header, index in indexes.items()}
         if not any(_cell_text(value) for value in values.values()):
             continue
-        code = _cell_text(values["code"])
         name = _cell_text(values["name"])
         district_code = _cell_text(values["district_code"])
         row_errors = []
-        if not code:
-            row_errors.append("code is required")
         if not name:
             row_errors.append("name is required")
         if district_code != district.code:
             row_errors.append(f"district_code must be {district.code}")
-        if code in seen_codes:
-            row_errors.append(f"code {code} appears more than once")
-        seen_codes.add(code)
+        if name.casefold() in seen_names:
+            row_errors.append(f"name {name} appears more than once")
+        seen_names.add(name.casefold())
 
         ta_codes = _codes(values["ta_codes"])
         gvh_codes = _codes(values["gvh_codes"])
@@ -268,7 +264,6 @@ def parse_workbook(uploaded_file, district):
         else:
             parsed.append(
                 {
-                    "code": code,
                     "name": name,
                     "type": _cell_text(values["type"]) or None,
                     "date_from": date_from,
@@ -286,12 +281,12 @@ def parse_workbook(uploaded_file, district):
 
 
 @transaction.atomic
-def import_workbook(uploaded_file, district, audit_user_id):
+def import_workbook(uploaded_file, district, user):
     records = parse_workbook(uploaded_file, district)
-    return import_records(records, district, audit_user_id)
+    return import_records(records, district, user)
 
 
-def import_csv(uploaded_file, district, audit_user_id):
+def import_csv(uploaded_file, district, user):
     try:
         content = uploaded_file.read().decode("utf-8-sig")
         reader = csv.DictReader(StringIO(content))
@@ -307,18 +302,15 @@ def import_csv(uploaded_file, district, audit_user_id):
     errors = []
     for row_number, row in enumerate(reader, start=2):
         values = {(key or "").strip().lower(): _cell_text(value) for key, value in row.items()}
-        code = values["micro_catchment_code"]
         name = values["micro_catchment_name"]
         ta_code = values["ta_code"]
         gvh_code = values["gvh_code"]
-        if not code and not name:
+        if not name:
             continue
 
         row_errors = []
         if values["district_code"] != district.code:
             row_errors.append(f"district_code must be {district.code}")
-        if not code:
-            row_errors.append("micro_catchment_code is required")
         if not name:
             row_errors.append("micro_catchment_name is required")
         ta = Location.objects.filter(
@@ -352,13 +344,15 @@ def import_csv(uploaded_file, district, audit_user_id):
             continue
 
         record = grouped.setdefault(
-            code,
+            name.casefold(),
             {"name": name, "tas": [], "gvhs": [], "start_date": start_date, "end_date": end_date},
         )
         if record["name"] != name:
-            errors.append(f"Row {row_number}: micro_catchment_name is inconsistent for code {code}.")
+            errors.append(f"Row {row_number}: micro_catchment_name is inconsistent across matching rows.")
         elif record["start_date"] != start_date or record["end_date"] != end_date:
-            errors.append(f"Row {row_number}: start_date or end_date is inconsistent for code {code}.")
+            errors.append(
+                f"Row {row_number}: start_date or end_date is inconsistent across matching rows."
+            )
         elif ta.id not in {location.id for location in record["tas"]}:
             record["tas"].append(ta)
         if gvh and gvh.id not in {location.id for location in record["gvhs"]}:
@@ -371,7 +365,6 @@ def import_csv(uploaded_file, district, audit_user_id):
 
     records = [
         {
-            "code": code,
             "name": values["name"],
             "type": None,
             "date_from": values["start_date"],
@@ -379,12 +372,12 @@ def import_csv(uploaded_file, district, audit_user_id):
             "tas": values["tas"],
             "gvhs": values["gvhs"],
         }
-        for code, values in grouped.items()
+        for values in grouped.values()
     ]
-    return import_records(records, district, audit_user_id)
+    return import_records(records, district, user)
 
 
-def import_excel(uploaded_file, district, audit_user_id):
+def import_excel(uploaded_file, district, user):
     try:
         workbook = load_workbook(uploaded_file, data_only=True, read_only=True)
         sheet = workbook["MicroCatchments"]
@@ -400,64 +393,66 @@ def import_excel(uploaded_file, district, audit_user_id):
         for row in sheet.iter_rows(values_only=True):
             writer.writerow(row)
         converted = BytesIO(output.getvalue().encode("utf-8-sig"))
-        return import_csv(converted, district, audit_user_id)
-    return import_workbook(uploaded_file, district, audit_user_id)
+        return import_csv(converted, district, user)
+    return import_workbook(uploaded_file, district, user)
 
 
 @transaction.atomic
-def import_records(records, district, audit_user_id):
-    now = TimeUtils.now()
-    created = updated = 0
+def import_records(records, district, user):
+    validation_errors = []
+    for record in records:
+        name = record["name"].strip()
+        if MicroCatchment.objects.filter(
+            name__iexact=name,
+            district=district,
+            validity_to__isnull=True,
+        ).exists():
+            validation_errors.append(
+                f"Micro-catchment name '{name}' already exists."
+            )
+
+        gvh_ids = [location.id for location in record["gvhs"]]
+        conflicting_gvh_ids = MicroCatchmentGVH.objects.filter(
+            location_id__in=gvh_ids,
+            validity_to__isnull=True,
+            micro_catchment__validity_to__isnull=True,
+        ).values_list("location_id", flat=True)
+        conflicting_gvhs = Location.objects.filter(
+            id__in=conflicting_gvh_ids,
+        ).order_by("code")
+        if conflicting_gvhs.exists():
+            conflict_labels = ", ".join(
+                f"{gvh.code} - {gvh.name}" for gvh in conflicting_gvhs
+            )
+            validation_errors.append(
+                f"Micro-catchment '{name}' contains GVH(s) already assigned to another "
+                f"micro-catchment: {conflict_labels}."
+            )
+
+    if validation_errors:
+        raise ValidationError(validation_errors)
+
+    created = 0
+    service = MicroCatchmentService(user)
+    audit_user_id = user.id_for_audit
 
     for record in records:
-        tas = record.pop("tas")
-        gvhs = record.pop("gvhs")
-        catchment = MicroCatchment.objects.filter(
-            code=record["code"], validity_to__isnull=True
-        ).first()
-        if catchment:
-            if catchment.district_id != district.id:
-                raise ValidationError(
-                    f"Code {record['code']} already belongs to another district."
-                )
-            catchment.save_history()
-            for field, value in record.items():
-                setattr(catchment, field, value)
-            catchment.audit_user_id = audit_user_id
-            catchment.validity_from = now
-            catchment.save()
-            updated += 1
-        else:
-            catchment = MicroCatchment.objects.create(
-                **record,
-                district=district,
-                audit_user_id=audit_user_id,
-                validity_from=now,
-            )
-            created += 1
+        tas = record["tas"]
+        gvhs = record["gvhs"]
+        service.update_or_create(
+            {
+                **{
+                    key: value
+                    for key, value in record.items()
+                    if key not in ("tas", "gvhs")
+                },
+                "district_id": district.id,
+                "ta_ids": [location.id for location in tas],
+                "gvh_ids": [location.id for location in gvhs],
+                "audit_user_id": audit_user_id,
+                "validity_from": TimeUtils.now(),
+            }
+        )
+        created += 1
 
-        _sync_links(catchment, tas, MicroCatchmentTA, "traditional_authorities", audit_user_id, now)
-        _sync_links(catchment, gvhs, MicroCatchmentGVH, "gvhs", audit_user_id, now)
-
-    return {"created": created, "updated": updated, "total": len(records)}
-
-
-def _sync_links(catchment, locations, model, related_name, audit_user_id, now):
-    location_ids = {location.id for location in locations}
-    related = getattr(catchment, related_name)
-    related.filter(validity_to__isnull=True).exclude(location_id__in=location_ids).update(validity_to=now)
-    existing = set(
-        related.filter(validity_to__isnull=True).values_list("location_id", flat=True)
-    )
-    model.objects.bulk_create(
-        [
-            model(
-                micro_catchment=catchment,
-                location=location,
-                audit_user_id=audit_user_id,
-                validity_from=now,
-            )
-            for location in locations
-            if location.id not in existing
-        ]
-    )
+    return {"created": created, "updated": 0, "total": len(records)}

@@ -5,9 +5,9 @@ from uuid import UUID
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.serializers.json import DjangoJSONEncoder
+from django.db import transaction
 from django.db.models import Q
 from django.utils.translation import gettext as _
-from django.db import transaction
 
 from core.signals import register_service_signal
 from location.apps import LocationConfig
@@ -19,6 +19,7 @@ from location.models import (
     MicroCatchment,
     MicroCatchmentTA,
     MicroCatchmentGVH,
+    allowed_micro_catchment_district_ids,
     Catchment,
     CatchmentDistrict,
 )
@@ -260,16 +261,6 @@ class MicroCatchmentService:
     def __init__(self, user):
         self.user = user
 
-    @staticmethod
-    def check_unique_code(code):
-        if MicroCatchment.objects.filter(code=code, validity_to__isnull=True).exists():
-            return [{"message": "Micro Catchment code %s already exists" % code}]
-        return []
-
-    def validate_data(self, **data):
-        error = self.check_unique_code(data["code"])
-        return error
-
     def _validate_micro_catchment_relations(self, data, ta_ids, gvh_ids):
         district_id = data.get("district_id")
         if not district_id:
@@ -289,6 +280,10 @@ class MicroCatchmentService:
         ).first()
         if not district:
             raise ValidationError("Invalid district")
+
+        allowed_district_ids = allowed_micro_catchment_district_ids(self.user)
+        if allowed_district_ids is not None and district.id not in allowed_district_ids:
+            raise PermissionDenied(_("unauthorized"))
 
         ta_ids_set = set(ta_ids)
         valid_ta_ids = set(
@@ -315,6 +310,7 @@ class MicroCatchmentService:
             raise ValidationError("GVHs must belong to selected Traditional Authorities")
 
     @register_service_signal("micro_catchment_service.update_or_create")
+    @transaction.atomic
     def update_or_create(self, data):
         ta_ids = data.pop("ta_ids", []) or []
         gvh_ids = data.pop("gvh_ids", []) or []
@@ -322,11 +318,45 @@ class MicroCatchmentService:
 
         self._validate_micro_catchment_relations(data, ta_ids, gvh_ids)
 
+        name = (data.get("name") or "").strip()
+        duplicate_name = MicroCatchment.objects.filter(
+            name__iexact=name,
+            district_id=data["district_id"],
+            validity_to__isnull=True,
+        )
         if micro_catchment_uuid:
-            micro_catchment = MicroCatchment.objects.get(uuid=micro_catchment_uuid)
+            duplicate_name = duplicate_name.exclude(uuid=micro_catchment_uuid)
+        if duplicate_name.exists():
+            raise ValidationError(
+                f"Micro-catchment name '{name}' already exists."
+            )
+        data["name"] = name
+
+        if micro_catchment_uuid:
+            # Codes identify their original hierarchy and are immutable.
+            data.pop("code", None)
+            micro_catchment = MicroCatchment.get_queryset(None, self.user).get(
+                uuid=micro_catchment_uuid,
+                validity_to__isnull=True,
+            )
             micro_catchment.save_history()
             [setattr(micro_catchment, key, data[key]) for key in data]
         else:
+            # The first selected TA owns the code. Locking it serializes code
+            # allocation when multiple requests create under the same TA.
+            primary_ta = Location.objects.select_for_update().get(id=ta_ids[0])
+            prefix = primary_ta.code
+            if not prefix:
+                raise ValidationError("The primary Traditional Authority must have a code")
+
+            next_number = 1
+            for existing_code in MicroCatchment.objects.filter(
+                code__startswith=prefix,
+            ).values_list("code", flat=True):
+                suffix = existing_code[len(prefix):]
+                if suffix.isdigit():
+                    next_number = max(next_number, int(suffix) + 1)
+            data["code"] = f"{prefix}{next_number:02d}"
             micro_catchment = MicroCatchment.objects.create(**data)
 
         micro_catchment.save()

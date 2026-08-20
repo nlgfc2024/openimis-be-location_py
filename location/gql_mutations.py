@@ -12,6 +12,7 @@ from .models import (
 )
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError, PermissionDenied
+from django.db import transaction
 from django.utils.translation import gettext as _
 from graphene import InputObjectType
 
@@ -387,7 +388,7 @@ class DeleteHealthFacilityMutation(OpenIMISMutation):
 class MicroCatchmentInputType(OpenIMISMutation.Input):
     id = graphene.Int(required=False, read_only=True)
     uuid = graphene.String(required=False)
-    code = graphene.String(required=True)
+    code = graphene.String(required=False)
     name = graphene.String(required=True)
     type = graphene.String(required=False)
     district_id = graphene.Int(required=False)
@@ -415,13 +416,10 @@ class CreateMicroCatchmentMutation(OpenIMISMutation):
     @classmethod
     def async_mutate(cls, user, **data):
         try:
-            if MicroCatchmentService.check_unique_code(data.get("code")):
-                raise ValidationError(_("mutation.micro_catchment_code_duplicated"))
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            # TODO: Add proper permission check when permission is defined
-            # if not user.has_perms(LocationConfig.gql_mutation_create_micro_catchments_perms):
-            #     raise PermissionDenied(_("unauthorized"))
+            if not user.has_perms(LocationConfig.gql_mutation_create_locations_perms):
+                raise PermissionDenied(_("unauthorized"))
 
             data["audit_user_id"] = user.id_for_audit
             from core.utils import TimeUtils
@@ -451,15 +449,8 @@ class UpdateMicroCatchmentMutation(OpenIMISMutation):
         try:
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            # TODO: Add proper permission check when permission is defined
-            # if not user.has_perms(LocationConfig.gql_mutation_edit_micro_catchments_perms):
-            #     raise PermissionDenied(_("unauthorized"))
-
-            incoming_code = data["code"]
-            current_mc = MicroCatchment.objects.get(uuid=data["uuid"])
-            if current_mc.code != incoming_code:
-                if MicroCatchmentService.check_unique_code(incoming_code):
-                    raise ValidationError(_("mutation.micro_catchment_code_duplicated"))
+            if not user.has_perms(LocationConfig.gql_mutation_edit_locations_perms):
+                raise PermissionDenied(_("unauthorized"))
 
             data["audit_user_id"] = user.id_for_audit
             from core.utils import TimeUtils
@@ -492,7 +483,7 @@ class DeleteMicroCatchmentMutation(OpenIMISMutation):
                 LocationConfig.gql_mutation_delete_micro_catchments_perms
             ):
                 raise PermissionDenied(_("unauthorized"))
-            mc = MicroCatchment.objects.get(
+            mc = MicroCatchment.get_queryset(None, user).get(
                 uuid=data["uuid"], validity_to__isnull=True
             )
 
@@ -516,7 +507,7 @@ class DeleteMicroCatchmentMutation(OpenIMISMutation):
 class HotspotInputType(OpenIMISMutation.Input):
     id = graphene.Int(required=False, read_only=True)
     uuid = graphene.String(required=False)
-    code = graphene.String(required=True)
+    code = graphene.String(required=False)
     name = graphene.String(required=True)
     description = graphene.String(required=False)
     micro_catchment_uuid = graphene.String(required=True)
@@ -550,6 +541,7 @@ def get_hotspot_eligible_villages(micro_catchment, hotspot=None):
     )
 
 
+@transaction.atomic
 def update_or_create_hotspot(data, user):
     if "client_mutation_id" in data:
         data.pop("client_mutation_id")
@@ -565,7 +557,7 @@ def update_or_create_hotspot(data, user):
         raise ValidationError(_("location.mutation.hotspot_villages_required"))
 
     try:
-        micro_catchment = MicroCatchment.objects.get(
+        micro_catchment = MicroCatchment.get_queryset(None, user).select_for_update().get(
             uuid=micro_catchment_uuid, validity_to__isnull=True
         )
     except MicroCatchment.DoesNotExist:
@@ -573,9 +565,11 @@ def update_or_create_hotspot(data, user):
 
     current_hotspot = None
     if data.get("uuid"):
-        current_hotspot = Hotspot.objects.filter(
+        current_hotspot = Hotspot.get_queryset(None, user).filter(
             uuid=data["uuid"], validity_to__isnull=True
         ).first()
+        if current_hotspot is None:
+            raise PermissionDenied(_("unauthorized"))
     eligible_villages = get_hotspot_eligible_villages(micro_catchment, current_hotspot)
     villages = list(eligible_villages.filter(uuid__in=village_uuids))
     if len(villages) != len(village_uuids):
@@ -598,9 +592,22 @@ def update_or_create_hotspot(data, user):
     data["micro_catchment"] = micro_catchment
 
     if not data.get("uuid"):
+        prefix = micro_catchment.code
+        next_number = 1
+        for existing_code in Hotspot.objects.filter(
+            code__startswith=prefix
+        ).values_list("code", flat=True):
+            suffix = existing_code[len(prefix):]
+            if suffix.isdigit():
+                next_number = max(next_number, int(suffix) + 1)
+        data["code"] = f"{prefix}{next_number:02d}"
         hotspot = Hotspot.objects.create(**data)
     else:
-        hotspot = Hotspot.objects.get(uuid=data["uuid"])
+        # Moving or editing a hotspot must not rewrite its identifier.
+        data.pop("code", None)
+        hotspot = Hotspot.get_queryset(None, user).get(
+            uuid=data["uuid"], validity_to__isnull=True
+        )
         for field, value in data.items():
             setattr(hotspot, field, value)
         hotspot.save()
@@ -701,7 +708,9 @@ class DeleteHotspotMutation(OpenIMISMutation):
         try:
             if not user.has_perms(LocationConfig.gql_mutation_delete_locations_perms):
                 raise PermissionDenied(_("unauthorized"))
-            hotspot = Hotspot.objects.get(uuid=data["uuid"])
+            hotspot = Hotspot.get_queryset(None, user).get(
+                uuid=data["uuid"], validity_to__isnull=True
+            )
 
             from core import datetime
 
