@@ -456,6 +456,7 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
     class Meta:
         managed = True
         db_table = "tblLocations"
+        ordering = ["name"]
 
 
 class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
@@ -745,8 +746,7 @@ class UserDistrict(core_models.VersionedModel):
                         *UserDistrict.filter_validity(),
                         *Location.filter_validity(prefix="location__"),
                     )
-                    .order_by("location__parent__code")
-                    .order_by("location__code")
+                    .order_by("location__parent__name", "location__name")
                 )
             for d in districts:
                 cachedata.append([d.id, d.location_id])
@@ -784,7 +784,7 @@ class UserDistrict(core_models.VersionedModel):
         return (
             Location.objects.filter(*Location.filter_validity())
             .filter(parent__parent__userdistrict__user=user.i_user)
-            .order_by("code")
+            .order_by("name")
         )
 
     @classmethod
