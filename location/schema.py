@@ -70,9 +70,10 @@ class Query(graphene.ObjectType):
     locations_all = OrderedDjangoFilterConnectionField(
         LocationGQLType, orderBy=graphene.List(of_type=graphene.String)
     )
-    locations_str = DjangoFilterConnectionField(
+    locations_str = OrderedDjangoFilterConnectionField(
         LocationGQLType,
         str=graphene.String(),
+        orderBy=graphene.List(of_type=graphene.String),
     )
     user_districts = graphene.List(UserDistrictGQLType)
     officer_locations = graphene.List(
