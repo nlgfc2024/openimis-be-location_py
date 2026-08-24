@@ -317,7 +317,7 @@ class CatchmentGQLType(DjangoObjectType):
             catchment_links__validity_to__isnull=True,
             type="R",
             validity_to__isnull=True,
-        ).order_by("code")
+        ).order_by("name")
 
     @classmethod
     def get_queryset(cls, queryset, info):
