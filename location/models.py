@@ -456,7 +456,6 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
     class Meta:
         managed = True
         db_table = "tblLocations"
-        ordering = ["name"]
 
 
 class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
