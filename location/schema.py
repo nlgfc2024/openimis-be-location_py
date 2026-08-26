@@ -254,8 +254,8 @@ class Query(graphene.ObjectType):
         if "location_type" in kwargs:
             return current_officer.officer_allowed_locations.filter(
                 type=kwargs["location_type"]
-            )
-        return current_officer.officer_allowed_locations
+            ).order_by("name")
+        return current_officer.officer_allowed_locations.order_by("name")
 
     def resolve_micro_catchments(self, info, **kwargs):
         show_history = kwargs.get("showHistory", False)
