@@ -70,9 +70,10 @@ class Query(graphene.ObjectType):
     locations_all = OrderedDjangoFilterConnectionField(
         LocationGQLType, orderBy=graphene.List(of_type=graphene.String)
     )
-    locations_str = DjangoFilterConnectionField(
+    locations_str = OrderedDjangoFilterConnectionField(
         LocationGQLType,
         str=graphene.String(),
+        orderBy=graphene.List(of_type=graphene.String),
     )
     user_districts = graphene.List(UserDistrictGQLType)
     officer_locations = graphene.List(
@@ -133,7 +134,7 @@ class Query(graphene.ObjectType):
             hotspot = Hotspot.get_queryset(None, info.context.user).filter(
                 uuid=hotspot_uuid, validity_to__isnull=True
             ).first()
-        return get_hotspot_eligible_villages(micro_catchment, hotspot).order_by("code")
+        return get_hotspot_eligible_villages(micro_catchment, hotspot).order_by("name")
 
     def resolve_hotspots(self, info, **kwargs):
         if info.context.user.is_anonymous:
@@ -253,8 +254,8 @@ class Query(graphene.ObjectType):
         if "location_type" in kwargs:
             return current_officer.officer_allowed_locations.filter(
                 type=kwargs["location_type"]
-            )
-        return current_officer.officer_allowed_locations
+            ).order_by("name")
+        return current_officer.officer_allowed_locations.order_by("name")
 
     def resolve_micro_catchments(self, info, **kwargs):
         show_history = kwargs.get("showHistory", False)
