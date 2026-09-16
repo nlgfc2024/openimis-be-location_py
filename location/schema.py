@@ -53,7 +53,10 @@ from core import models as core_models
 from django.conf import settings
 
 
-class Query(graphene.ObjectType):
+from location.clusters import ClusterQuery, SaveClusterMutation, DeleteClusterMutation
+
+
+class Query(ClusterQuery, graphene.ObjectType):
     health_facilities = OrderedDjangoFilterConnectionField(
         HealthFacilityGQLType,
         showHistory=graphene.Boolean(),
@@ -290,6 +293,8 @@ class Query(graphene.ObjectType):
 
 
 class Mutation(graphene.ObjectType):
+    save_cluster = SaveClusterMutation.Field()
+    delete_cluster = DeleteClusterMutation.Field()
     create_location = CreateLocationMutation.Field()
     update_location = UpdateLocationMutation.Field()
     delete_location = DeleteLocationMutation.Field()

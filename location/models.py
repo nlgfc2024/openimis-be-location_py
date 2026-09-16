@@ -3,6 +3,7 @@ from django_redis.cache import RedisCache
 import uuid
 from core.models import CachedManager
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models, connection
 from django.dispatch import receiver
 from django.db.models.signals import post_save, post_delete
@@ -845,6 +846,59 @@ class OfficerVillage(core_models.VersionedModel):
         if settings.ROW_SECURITY:
             pass
         return queryset
+
+
+class Cluster(core_models.VersionedModel):
+    """A cluster belonging to exactly one traditional authority."""
+
+    id = models.AutoField(db_column="ClusterId", primary_key=True)
+    uuid = models.CharField(
+        db_column="ClusterUUID", max_length=36, default=uuid.uuid4, unique=True
+    )
+    code = models.CharField(db_column="Code", max_length=50)
+    name = models.CharField(db_column="Name", max_length=255)
+    traditional_authority = models.ForeignKey(
+        Location,
+        on_delete=models.PROTECT,
+        db_column="TraditionalAuthorityId",
+        related_name="clusters",
+        limit_choices_to={"type": "D"},
+    )
+    audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    class Meta:
+        managed = True
+        db_table = "tblClusters"
+
+    def __str__(self):
+        return self.code or self.name
+
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        queryset = queryset if queryset is not None else cls.objects.all()
+        if getattr(user, "is_anonymous", True):
+            return queryset.none()
+        district_ids = allowed_micro_catchment_district_ids(user)
+        if district_ids is not None:
+            queryset = queryset.filter(traditional_authority__parent_id__in=district_ids)
+        return queryset
+
+    def clean(self):
+        super().clean()
+        if not self.traditional_authority_id:
+            raise ValidationError({
+                "traditional_authority": "A traditional authority is required."
+            })
+        if not Location.objects.filter(
+            pk=self.traditional_authority_id, type="D"
+        ).exists():
+            raise ValidationError({
+                "traditional_authority": "Select a traditional authority."
+            })
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
 
 
 class MicroCatchment(core_models.VersionedModel):

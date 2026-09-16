@@ -21,6 +21,10 @@ DEFAULT_CFG = {
     "gql_mutation_create_catchments_perms": ["121912"],
     "gql_mutation_edit_catchments_perms": ["121913"],
     "gql_mutation_delete_catchments_perms": ["121914"],
+    "gql_query_clusters_perms": ["121921"],
+    "gql_mutation_create_clusters_perms": ["121922"],
+    "gql_mutation_edit_clusters_perms": ["121923"],
+    "gql_mutation_delete_clusters_perms": ["121924"],
     "no_location_check": False,
 
     "health_facility_level": [
@@ -62,6 +66,10 @@ class LocationConfig(AppConfig):
     gql_mutation_create_catchments_perms = ["121912"]
     gql_mutation_edit_catchments_perms = ["121913"]
     gql_mutation_delete_catchments_perms = ["121914"]
+    gql_query_clusters_perms = ["121921"]
+    gql_mutation_create_clusters_perms = ["121922"]
+    gql_mutation_edit_clusters_perms = ["121923"]
+    gql_mutation_delete_clusters_perms = ["121924"]
     no_location_check = None
     health_facility_level = []
     health_facility_contract_dates_mandatory = None

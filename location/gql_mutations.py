@@ -474,7 +474,7 @@ class DeleteMicroCatchmentMutation(OpenIMISMutation):
 
     class Input(OpenIMISMutation.Input):
         uuid = graphene.String(required=True)
-        code = graphene.String(required=True)
+        code = graphene.String(required=False)
 
     @classmethod
     def async_mutate(cls, user, **data):
