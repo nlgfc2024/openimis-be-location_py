@@ -17,10 +17,10 @@ from location.gql_mutations import (
     CreateMicroCatchmentMutation,
     UpdateMicroCatchmentMutation,
     DeleteMicroCatchmentMutation,
-    CreateHotspotMutation,
-    UpdateHotspotMutation,
-    DeleteHotspotMutation,
-    get_hotspot_eligible_villages,
+    CreateZoneMutation,
+    UpdateZoneMutation,
+    DeleteZoneMutation,
+    get_zone_eligible_villages,
     CreateCatchmentMutation,
     UpdateCatchmentMutation,
     DeleteCatchmentMutation,
@@ -30,7 +30,7 @@ from location.gql_queries import (
     LocationGQLType,
     HealthFacilityGQLType,
     MicroCatchmentGQLType,
-    HotspotGQLType,
+    ZoneGQLType,
     CatchmentGQLType,
 
 )
@@ -42,7 +42,8 @@ from location.models import (
     LocationMutation,
     HealthFacilityMutation,
     MicroCatchment,
-    Hotspot,
+    Zone,
+    Cluster,
     Catchment,
 )
 from location.services import LocationService, HealthFacilityService
@@ -62,8 +63,10 @@ class Query(ClusterQuery, graphene.ObjectType):
         showHistory=graphene.Boolean(),
         orderBy=graphene.List(of_type=graphene.String),
     )
-    hotspots = OrderedDjangoFilterConnectionField(
-        HotspotGQLType,
+    zones = OrderedDjangoFilterConnectionField(
+        ZoneGQLType,
+        search=graphene.String(),
+        cluster_uuid=graphene.String(),
         orderBy=graphene.List(of_type=graphene.String),
     )
     locations = OrderedDjangoFilterConnectionField(
@@ -108,12 +111,11 @@ class Query(ClusterQuery, graphene.ObjectType):
         showHistory=graphene.Boolean(),
         orderBy=graphene.List(of_type=graphene.String),
     )
-    hotspot_eligible_villages = graphene.List(
+    zone_eligible_villages = graphene.List(
         LocationGQLType,
-        micro_catchment_uuid=graphene.String(required=True),
-        hotspot_uuid=graphene.String(required=False),
-        description="Villages selectable for a hotspot in the given micro-catchment "
-        "(villages under the micro-catchment's GVHs).",
+        cluster_uuid=graphene.String(required=True),
+        zone_uuid=graphene.String(required=False),
+        description="Villages selectable for a zone in the given cluster.",
     )
     catchments = OrderedDjangoFilterConnectionField(
         CatchmentGQLType,
@@ -123,26 +125,32 @@ class Query(ClusterQuery, graphene.ObjectType):
         orderBy=graphene.List(of_type=graphene.String),
     )
 
-    def resolve_hotspot_eligible_villages(self, info, micro_catchment_uuid, hotspot_uuid=None, **kwargs):
+    def resolve_zone_eligible_villages(self, info, cluster_uuid, zone_uuid=None, **kwargs):
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
         try:
-            micro_catchment = MicroCatchment.get_queryset(None, info.context.user).get(
-                uuid=micro_catchment_uuid, validity_to__isnull=True
+            cluster = Cluster.get_queryset(None, info.context.user).get(
+                uuid=cluster_uuid, validity_to__isnull=True
             )
-        except MicroCatchment.DoesNotExist:
+        except Cluster.DoesNotExist:
             return []
-        hotspot = None
-        if hotspot_uuid:
-            hotspot = Hotspot.get_queryset(None, info.context.user).filter(
-                uuid=hotspot_uuid, validity_to__isnull=True
+        zone = None
+        if zone_uuid:
+            zone = Zone.get_queryset(None, info.context.user).filter(
+                uuid=zone_uuid, validity_to__isnull=True
             ).first()
-        return get_hotspot_eligible_villages(micro_catchment, hotspot).order_by("name")
+        return get_zone_eligible_villages(cluster, zone).order_by("name")
 
-    def resolve_hotspots(self, info, **kwargs):
+    def resolve_zones(self, info, **kwargs):
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
-        query = Hotspot.get_queryset(None, info.context.user)
+        query = Zone.get_queryset(None, info.context.user)
+        search = kwargs.get("search")
+        if search:
+            query = query.filter(Q(code__icontains=search) | Q(name__icontains=search))
+        cluster_uuid = kwargs.get("cluster_uuid")
+        if cluster_uuid:
+            query = query.filter(cluster__uuid=cluster_uuid)
         return gql_optimizer.query(query.all(), info)
 
     def resolve_health_facilities(self, info, **kwargs):
@@ -305,9 +313,9 @@ class Mutation(graphene.ObjectType):
     create_micro_catchment = CreateMicroCatchmentMutation.Field()
     update_micro_catchment = UpdateMicroCatchmentMutation.Field()
     delete_micro_catchment = DeleteMicroCatchmentMutation.Field()
-    create_hotspot = CreateHotspotMutation.Field()
-    update_hotspot = UpdateHotspotMutation.Field()
-    delete_hotspot = DeleteHotspotMutation.Field()
+    create_zone = CreateZoneMutation.Field()
+    update_zone = UpdateZoneMutation.Field()
+    delete_zone = DeleteZoneMutation.Field()
     create_catchment = CreateCatchmentMutation.Field()
     update_catchment = UpdateCatchmentMutation.Field()
     delete_catchment = DeleteCatchmentMutation.Field()

@@ -10,7 +10,7 @@ class ClusterMenuTest(TestCase):
         config = {"otherSetting": True, "menus": [{"id": "AdminMainMenu", "submenus": [
             {"id": "location.microCatchments", "position": 4},
             {"id": "location.catchments", "position": 5},
-            {"id": "admin.hotspots", "position": 6},
+            {"id": "admin.zones", "position": 6},
             {"id": "profile.myProfile", "position": 7},
             {"App.enablePublicPage": True},
         ]}]}

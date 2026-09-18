@@ -13,7 +13,7 @@ def add_cluster_menu(config):
             return False
         location_positions = [
             item["position"] for item in submenus
-            if item.get("id") in {"admin.locations", "location.microCatchments", "location.catchments", "admin.hotspots"}
+            if item.get("id") in {"admin.locations", "location.microCatchments", "location.catchments", "admin.zones"}
             and isinstance(item.get("position"), (int, float))
         ]
         position = max(location_positions, default=0) + 1

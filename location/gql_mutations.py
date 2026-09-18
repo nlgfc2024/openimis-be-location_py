@@ -7,8 +7,9 @@ from .models import (
     HealthFacility,
     UserDistrict,
     MicroCatchment,
-    Hotspot,
-    HotspotVillage,
+    Zone,
+    ZoneVillage,
+    Cluster,
 )
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import ValidationError, PermissionDenied
@@ -504,140 +505,148 @@ class DeleteMicroCatchmentMutation(OpenIMISMutation):
             ]
 
 
-class HotspotInputType(OpenIMISMutation.Input):
+class ZoneInputType(OpenIMISMutation.Input):
     id = graphene.Int(required=False, read_only=True)
     uuid = graphene.String(required=False)
     code = graphene.String(required=False)
     name = graphene.String(required=True)
     description = graphene.String(required=False)
-    micro_catchment_uuid = graphene.String(required=True)
-    village_uuids = graphene.List(graphene.String, required=True)
+    cluster_uuid = graphene.String(required=True)
+    village_uuids = graphene.List(graphene.String, required=False)
 
 
-def get_hotspot_eligible_villages(micro_catchment, hotspot=None):
+def get_zone_eligible_villages(cluster, zone=None):
     """
-    Villages (Location type V) that can be attached to a hotspot for the given
-    micro-catchment: those whose parent GVH (Location type W under the Malawi
-    mapping) belongs to the micro-catchment's GVH set (its `gvhs` links).
+    Villages under the selected Cluster's Traditional Authority.
     """
     gvh_locations = Location.objects.filter(
         *Location.filter_validity(),
-        micro_catchments_gvh__micro_catchment=micro_catchment,
-        micro_catchments_gvh__validity_to__isnull=True,
+        parent=cluster.traditional_authority,
     )
     villages = Location.objects.filter(
         *Location.filter_validity(),
         type="V",
         parent__in=gvh_locations,
     )
-    assigned_villages = HotspotVillage.objects.filter(
+    assigned_villages = ZoneVillage.objects.filter(
         validity_to__isnull=True,
-        hotspot__validity_to__isnull=True,
+        zone__validity_to__isnull=True,
     )
-    if hotspot:
-        assigned_villages = assigned_villages.exclude(hotspot=hotspot)
+    if zone:
+        assigned_villages = assigned_villages.exclude(zone=zone)
     return villages.exclude(
         id__in=assigned_villages.values_list("location_id", flat=True)
     )
 
 
 @transaction.atomic
-def update_or_create_hotspot(data, user):
+def update_or_create_zone(data, user):
     if "client_mutation_id" in data:
         data.pop("client_mutation_id")
     if "client_mutation_label" in data:
         data.pop("client_mutation_label")
 
-    micro_catchment_uuid = data.pop("micro_catchment_uuid", None)
-    village_uuids = list(dict.fromkeys(data.pop("village_uuids", None) or []))
+    cluster_uuid = data.pop("cluster_uuid", None)
+    village_uuids = data.pop("village_uuids", None)
+    if village_uuids is not None:
+        village_uuids = list(dict.fromkeys(village_uuids or []))
 
-    if not micro_catchment_uuid:
-        raise ValidationError(_("location.mutation.hotspot_micro_catchment_required"))
-    if not village_uuids:
-        raise ValidationError(_("location.mutation.hotspot_villages_required"))
+    if not cluster_uuid:
+        raise ValidationError("A cluster is required")
+
+    data["name"] = (data.get("name") or "").strip()
+    if not data["name"]:
+        raise ValidationError("A zone name is required")
 
     try:
-        micro_catchment = MicroCatchment.get_queryset(None, user).select_for_update().get(
-            uuid=micro_catchment_uuid, validity_to__isnull=True
+        cluster = Cluster.get_queryset(None, user).select_for_update().get(
+            uuid=cluster_uuid, validity_to__isnull=True
         )
-    except MicroCatchment.DoesNotExist:
-        raise ValidationError(_("location.mutation.hotspot_micro_catchment_required"))
+    except Cluster.DoesNotExist:
+        raise ValidationError("Select an available cluster")
 
-    current_hotspot = None
+    current_zone = None
     if data.get("uuid"):
-        current_hotspot = Hotspot.get_queryset(None, user).filter(
+        current_zone = Zone.get_queryset(None, user).filter(
             uuid=data["uuid"], validity_to__isnull=True
         ).first()
-        if current_hotspot is None:
+        if current_zone is None:
             raise PermissionDenied(_("unauthorized"))
-    eligible_villages = get_hotspot_eligible_villages(micro_catchment, current_hotspot)
-    villages = list(eligible_villages.filter(uuid__in=village_uuids))
-    if len(villages) != len(village_uuids):
-        raise ValidationError(_("location.mutation.hotspot_invalid_villages"))
+        if village_uuids is None:
+            village_uuids = list(current_zone.villages.values_list("uuid", flat=True))
+    if not village_uuids:
+        raise ValidationError("At least one village is required for a zone")
+    villages = None
+    if village_uuids is not None:
+        eligible_villages = get_zone_eligible_villages(cluster, current_zone)
+        villages = list(eligible_villages.filter(uuid__in=village_uuids))
+        if len(villages) != len(village_uuids):
+            raise ValidationError("Selected villages are not available for this cluster")
 
-    # A village must belong to only one hotspot: reject any village already
-    # attached to another active hotspot.
-    conflicting = (
-        Hotspot.objects.filter(
-            validity_to__isnull=True,
-            village_links__location__in=villages,
-            village_links__validity_to__isnull=True,
+    # A village must belong to only one zone: reject duplicate active links.
+    if villages is not None:
+        conflicting = (
+            Zone.objects.filter(
+                validity_to__isnull=True,
+                village_links__location__in=villages,
+                village_links__validity_to__isnull=True,
+            )
+            .exclude(uuid=data.get("uuid"))
+            .distinct()
         )
-        .exclude(uuid=data.get("uuid"))
-        .distinct()
-    )
-    if conflicting.exists():
-        raise ValidationError(_("location.mutation.hotspot_village_already_assigned"))
+        if conflicting.exists():
+            raise ValidationError("A selected village is already assigned to another active zone")
 
-    data["micro_catchment"] = micro_catchment
+    data["cluster"] = cluster
 
     if not data.get("uuid"):
-        prefix = micro_catchment.code
+        prefix = cluster.code
         next_number = 1
-        for existing_code in Hotspot.objects.filter(
+        for existing_code in Zone.objects.filter(
             code__startswith=prefix
         ).values_list("code", flat=True):
             suffix = existing_code[len(prefix):]
             if suffix.isdigit():
                 next_number = max(next_number, int(suffix) + 1)
         data["code"] = f"{prefix}{next_number:02d}"
-        hotspot = Hotspot.objects.create(**data)
+        zone = Zone.objects.create(**data)
     else:
-        # Moving or editing a hotspot must not rewrite its identifier.
+        # Moving or editing a zone must not rewrite its identifier.
         data.pop("code", None)
-        hotspot = Hotspot.get_queryset(None, user).get(
+        zone = Zone.get_queryset(None, user).get(
             uuid=data["uuid"], validity_to__isnull=True
         )
         for field, value in data.items():
-            setattr(hotspot, field, value)
-        hotspot.save()
+            setattr(zone, field, value)
+        zone.save()
 
-    _set_hotspot_villages(hotspot, villages, data.get("audit_user_id"))
-    return hotspot
+    if villages is not None:
+        _set_zone_villages(zone, villages, data.get("audit_user_id"))
+    return zone
 
 
-def _set_hotspot_villages(hotspot, villages, audit_user_id):
+def _set_zone_villages(zone, villages, audit_user_id):
     from core.utils import TimeUtils
 
     village_ids = {v.id for v in villages}
     # Drop links that are no longer selected.
-    hotspot.village_links.exclude(location_id__in=village_ids).delete()
-    existing_ids = set(hotspot.village_links.values_list("location_id", flat=True))
+    zone.village_links.exclude(location_id__in=village_ids).delete()
+    existing_ids = set(zone.village_links.values_list("location_id", flat=True))
     for village in villages:
         if village.id not in existing_ids:
-            HotspotVillage.objects.create(
-                hotspot=hotspot,
+            ZoneVillage.objects.create(
+                zone=zone,
                 location=village,
                 audit_user_id=audit_user_id,
                 validity_from=TimeUtils.now(),
             )
 
 
-class CreateHotspotMutation(OpenIMISMutation):
+class CreateZoneMutation(OpenIMISMutation):
     _mutation_module = "location"
-    _mutation_class = "CreateHotspotMutation"
+    _mutation_class = "CreateZoneMutation"
 
-    class Input(HotspotInputType):
+    class Input(ZoneInputType):
         pass
 
     @classmethod
@@ -645,30 +654,30 @@ class CreateHotspotMutation(OpenIMISMutation):
         try:
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            if not user.has_perms(LocationConfig.gql_mutation_create_locations_perms):
+            if not user.has_perms(LocationConfig.gql_mutation_create_clusters_perms):
                 raise PermissionDenied(_("unauthorized"))
 
             data["audit_user_id"] = user.id_for_audit
             from core.utils import TimeUtils
 
             data["validity_from"] = TimeUtils.now()
-            update_or_create_hotspot(data, user)
+            update_or_create_zone(data, user)
             return None
         except Exception as exc:
             return [
                 {
-                    "message": _("location.mutation.failed_to_create_hotspot")
+                    "message": _("location.mutation.failed_to_create_zone")
                     % {"code": data.get("code", "")},
                     "detail": str(exc),
                 }
             ]
 
 
-class UpdateHotspotMutation(OpenIMISMutation):
+class UpdateZoneMutation(OpenIMISMutation):
     _mutation_module = "location"
-    _mutation_class = "UpdateHotspotMutation"
+    _mutation_class = "UpdateZoneMutation"
 
-    class Input(HotspotInputType):
+    class Input(ZoneInputType):
         pass
 
     @classmethod
@@ -676,28 +685,28 @@ class UpdateHotspotMutation(OpenIMISMutation):
         try:
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            if not user.has_perms(LocationConfig.gql_mutation_edit_locations_perms):
+            if not user.has_perms(LocationConfig.gql_mutation_edit_clusters_perms):
                 raise PermissionDenied(_("unauthorized"))
 
             data["audit_user_id"] = user.id_for_audit
             from core.utils import TimeUtils
 
             data["validity_from"] = TimeUtils.now()
-            update_or_create_hotspot(data, user)
+            update_or_create_zone(data, user)
             return None
         except Exception as exc:
             return [
                 {
-                    "message": _("location.mutation.failed_to_update_hotspot")
+                    "message": _("location.mutation.failed_to_update_zone")
                     % {"code": data.get("code", "")},
                     "detail": str(exc),
                 }
             ]
 
 
-class DeleteHotspotMutation(OpenIMISMutation):
+class DeleteZoneMutation(OpenIMISMutation):
     _mutation_module = "location"
-    _mutation_class = "DeleteHotspotMutation"
+    _mutation_class = "DeleteZoneMutation"
 
     class Input(OpenIMISMutation.Input):
         uuid = graphene.String()
@@ -706,22 +715,22 @@ class DeleteHotspotMutation(OpenIMISMutation):
     @classmethod
     def async_mutate(cls, user, **data):
         try:
-            if not user.has_perms(LocationConfig.gql_mutation_delete_locations_perms):
+            if not user.has_perms(LocationConfig.gql_mutation_delete_clusters_perms):
                 raise PermissionDenied(_("unauthorized"))
-            hotspot = Hotspot.get_queryset(None, user).get(
+            zone = Zone.get_queryset(None, user).get(
                 uuid=data["uuid"], validity_to__isnull=True
             )
 
             from core import datetime
 
             now = datetime.datetime.now()
-            hotspot.validity_to = now
-            hotspot.save()
+            zone.validity_to = now
+            zone.save()
             return None
         except Exception as exc:
             return [
                 {
-                    "message": _("location.mutation.failed_to_delete_hotspot")
+                    "message": _("location.mutation.failed_to_delete_zone")
                     % {"code": data.get("code", "")},
                     "detail": str(exc),
                 }

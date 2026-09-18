@@ -3,8 +3,8 @@ from django.test import TestCase, override_settings
 
 from core.test_helpers import create_manager_role, create_test_interactive_user
 from location.apps import LocationConfig
-from location.gql_mutations import update_or_create_hotspot
-from location.models import Hotspot, Location, MicroCatchment, UserDistrict
+from location.gql_mutations import update_or_create_zone
+from location.models import Cluster, Location, MicroCatchment, UserDistrict, Zone
 from location.services import MicroCatchmentService
 
 
@@ -28,8 +28,8 @@ class DistrictScopeTest(TestCase):
         )
         self.allowed_catchment = self._catchment("A", self.allowed_district)
         self.other_catchment = self._catchment("B", self.other_district)
-        self.allowed_hotspot = self._hotspot("A", self.allowed_catchment)
-        self.other_hotspot = self._hotspot("B", self.other_catchment)
+        self.allowed_cluster = Cluster.objects.create(code="CL-A", name="Cluster A", traditional_authority=self.allowed_ta, audit_user_id=-1)
+        self.other_cluster = Cluster.objects.create(code="CL-B", name="Cluster B", traditional_authority=self.other_ta, audit_user_id=-1)
 
     def tearDown(self):
         LocationConfig.no_location_check = self.previous_no_location_check
@@ -58,14 +58,6 @@ class DistrictScopeTest(TestCase):
             audit_user_id=-1,
         )
 
-    def _hotspot(self, suffix, micro_catchment):
-        return Hotspot.objects.create(
-            code=f"HS-SCOPE-{suffix}",
-            name=f"Hotspot {suffix}",
-            micro_catchment=micro_catchment,
-            audit_user_id=-1,
-        )
-
     def test_micro_catchment_queryset_is_limited_to_assigned_district(self):
         result = MicroCatchment.get_queryset(None, self.user)
 
@@ -85,11 +77,13 @@ class DistrictScopeTest(TestCase):
         self.assertFalse(result.filter(id=self.other_district.id).exists())
         self.assertFalse(result.filter(id=self.other_village.id).exists())
 
-    def test_hotspot_queryset_is_limited_to_assigned_district(self):
-        result = Hotspot.get_queryset(None, self.user)
+    def test_zone_queryset_is_limited_to_assigned_district(self):
+        allowed_zone = Zone.objects.create(code="Z-A", name="Zone A", cluster=self.allowed_cluster, audit_user_id=-1)
+        other_zone = Zone.objects.create(code="Z-B", name="Zone B", cluster=self.other_cluster, audit_user_id=-1)
+        result = Zone.get_queryset(None, self.user)
 
-        self.assertTrue(result.filter(id=self.allowed_hotspot.id).exists())
-        self.assertFalse(result.filter(id=self.other_hotspot.id).exists())
+        self.assertTrue(result.filter(id=allowed_zone.id).exists())
+        self.assertFalse(result.filter(id=other_zone.id).exists())
 
     def test_micro_catchment_creation_rejects_another_district(self):
         with self.assertRaises(PermissionDenied):
@@ -103,13 +97,12 @@ class DistrictScopeTest(TestCase):
                 }
             )
 
-    def test_hotspot_creation_rejects_another_district(self):
+    def test_zone_creation_rejects_another_district(self):
         with self.assertRaises(ValidationError):
-            update_or_create_hotspot(
+            update_or_create_zone(
                 {
-                    "name": "Unauthorized hotspot",
-                    "micro_catchment_uuid": self.other_catchment.uuid,
-                    "village_uuids": [self.other_village.uuid],
+                    "name": "Unauthorized zone",
+                    "cluster_uuid": self.other_cluster.uuid,
                     "audit_user_id": -1,
                 },
                 self.user,

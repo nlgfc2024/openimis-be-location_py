@@ -17,7 +17,7 @@ from location.models import (
     MicroCatchment,
     MicroCatchmentTA,
     MicroCatchmentGVH,
-    Hotspot,
+    Zone,
     Catchment,
     CatchmentDistrict,
 )
@@ -135,24 +135,22 @@ class HealthFacilityGQLType(DjangoObjectType):
         )
 
 
-class HotspotGQLType(DjangoObjectType):
+class ZoneGQLType(DjangoObjectType):
     client_mutation_id = graphene.String()
     villages = graphene.List(LocationGQLType)
 
     class Meta:
-        model = Hotspot
+        model = Zone
         interfaces = (graphene.relay.Node,)
         filter_fields = {
             "id": ["exact"],
             "uuid": ["exact"],
             "code": ["exact", "istartswith", "icontains", "iexact", "ne"],
             "name": ["exact", "istartswith", "icontains", "iexact", "ne"],
-            # Micro-Catchment (mandatory link)
-            "micro_catchment__uuid": ["exact", "in"],
-            "micro_catchment__name": ["exact", "istartswith", "icontains", "iexact"],
-            # District = the micro-catchment's district (Location type R, top level of the Malawi mapping)
-            "micro_catchment__district__uuid": ["exact", "in"],
-            # Villages attached to the hotspot (through the HotspotVillage link table)
+            "cluster__uuid": ["exact", "in"],
+            "cluster__name": ["exact", "istartswith", "icontains", "iexact"],
+            "cluster__traditional_authority__uuid": ["exact", "in"],
+            "cluster__traditional_authority__parent__uuid": ["exact", "in"],
             "village_links__location__uuid": ["exact", "in"],
             "village_links__location__parent__uuid": ["exact", "in"],
             "village_links__location__parent__parent__uuid": ["exact", "in"],
@@ -172,7 +170,7 @@ class HotspotGQLType(DjangoObjectType):
 
     @classmethod
     def get_queryset(cls, queryset, info):
-        return Hotspot.get_queryset(queryset, info.context.user)
+        return Zone.get_queryset(queryset, info.context.user)
 
 
 class UserRegionGQLType(graphene.ObjectType):

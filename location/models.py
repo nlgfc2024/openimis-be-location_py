@@ -459,24 +459,34 @@ class Location(core_models.VersionedModel, core_models.ExtendableModel):
         db_table = "tblLocations"
 
 
-class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
-    id = models.AutoField(db_column="HotspotId", primary_key=True)
+class Zone(core_models.VersionedModel, core_models.ExtendableModel):
+    id = models.AutoField(db_column="ZoneId", primary_key=True)
     uuid = models.CharField(
-        db_column="HotspotUUID", max_length=36, default=uuid.uuid4, unique=True
+        db_column="ZoneUUID", max_length=36, default=uuid.uuid4, unique=True
     )
-    code = models.CharField(db_column="HotspotCode", max_length=50, unique=True)
-    name = models.CharField(db_column="HotspotName", max_length=100)
+    code = models.CharField(db_column="ZoneCode", max_length=50, unique=True)
+    name = models.CharField(db_column="ZoneName", max_length=100)
     description = models.TextField(
-        db_column="HotspotDescription", blank=True, null=True
+        db_column="ZoneDescription", blank=True, null=True
     )
     audit_user_id = models.IntegerField(
         db_column="AuditUserID", blank=True, null=True
     )
+    cluster = models.ForeignKey(
+        "Cluster",
+        db_column="ClusterId",
+        on_delete=models.PROTECT,
+        related_name="zones",
+        null=True,
+        blank=True,
+    )
     micro_catchment = models.ForeignKey(
         "MicroCatchment",
         db_column="MicroCatchmentId",
-        on_delete=models.CASCADE,
-        related_name="hotspots",
+        on_delete=models.SET_NULL,
+        related_name="legacy_zones",
+        null=True,
+        blank=True,
     )
     legacy_id = models.IntegerField(db_column="LegacyID", blank=True, null=True)
 
@@ -485,16 +495,16 @@ class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
 
     @property
     def villages(self):
-        # Villages linked through the HotspotVillage table (active links only).
+        # Villages linked through the ZoneVillage table (active links only).
         return Location.objects.filter(
             *Location.filter_validity(),
-            hotspot_links__hotspot=self,
-            hotspot_links__validity_to__isnull=True,
+            zone_links__zone=self,
+            zone_links__validity_to__isnull=True,
         )
 
     class Meta:
         managed = True
-        db_table = "tblHotspots"
+        db_table = "tblZones"
 
     @classmethod
     def get_queryset(cls, queryset, user):
@@ -506,22 +516,35 @@ class Hotspot(core_models.VersionedModel, core_models.ExtendableModel):
             return queryset.filter(id=-1)
         district_ids = allowed_micro_catchment_district_ids(user)
         if district_ids is not None:
-            return queryset.filter(micro_catchment__district_id__in=district_ids)
+            return queryset.filter(
+                Q(cluster__traditional_authority__parent_id__in=district_ids)
+                | Q(cluster__isnull=True, micro_catchment__district_id__in=district_ids)
+            )
         return queryset
 
 
-class HotspotVillage(core_models.VersionedModel):
-    """Link table for Hotspot to its villages (Location type V).
+class Hotspot(Zone):
+    """Backward-compatible model name for integrations still using Hotspot."""
+
+    class Meta:
+        proxy = True
+        app_label = "location"
+
+
+
+
+class ZoneVillage(core_models.VersionedModel):
+    """Link table for Zone to its villages (Location type V).
 
     Uses an explicit through-model (not a Django M2M) because the core pre_save
     validator accesses M2M descriptors on unsaved VersionedModel instances,
     which fails on create.
     """
-    id = models.AutoField(db_column="HotspotVillageId", primary_key=True)
-    hotspot = models.ForeignKey(
-        Hotspot,
+    id = models.AutoField(db_column="ZoneVillageId", primary_key=True)
+    zone = models.ForeignKey(
+        Zone,
         models.CASCADE,
-        db_column="HotspotId",
+        db_column="ZoneId",
         related_name="village_links",
     )
     location = models.ForeignKey(
@@ -529,13 +552,14 @@ class HotspotVillage(core_models.VersionedModel):
         models.CASCADE,
         db_column="LocationId",
         limit_choices_to={"type": "V"},
-        related_name="hotspot_links",
+        related_name="zone_links",
     )
     audit_user_id = models.IntegerField(db_column="AuditUserID", blank=True, null=True)
 
     class Meta:
         managed = True
-        db_table = "tblHotspotVillages"
+        db_table = "tblZoneVillages"
+
 
 
 class HealthFacilityLegalForm(models.Model):

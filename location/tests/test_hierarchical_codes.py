@@ -6,9 +6,8 @@ from django.test import TestCase
 from django.core.exceptions import ValidationError
 from openpyxl import load_workbook
 
-from location.gql_mutations import update_or_create_hotspot
 from location.micro_catchment_workbook import build_template_workbook, build_workbook, import_excel, import_records
-from location.models import Hotspot, Location, MicroCatchment, MicroCatchmentTA
+from location.models import Location, MicroCatchment, MicroCatchmentTA
 from location.services import MicroCatchmentService
 
 
@@ -68,93 +67,8 @@ class HierarchicalCodeGenerationTest(TestCase):
 
         self.assertEqual(created.code, "2341100")
 
-    def test_hotspot_code_uses_micro_catchment_prefix_and_increments(self):
-        micro_catchment = self._create_micro_catchment("Catchment")
-        first_village = self._location("V", "V1", self.gvh)
-        second_village = self._location("V", "V2", self.gvh)
 
-        first = update_or_create_hotspot(
-            {
-                "name": "First",
-                "micro_catchment_uuid": micro_catchment.uuid,
-                "village_uuids": [first_village.uuid],
-                "audit_user_id": -1,
-            },
-            self.user,
-        )
-        second = update_or_create_hotspot(
-            {
-                "name": "Second",
-                "micro_catchment_uuid": micro_catchment.uuid,
-                "village_uuids": [second_village.uuid],
-                "audit_user_id": -1,
-            },
-            self.user,
-        )
 
-        self.assertEqual(first.code, f"{micro_catchment.code}01")
-        self.assertEqual(second.code, f"{micro_catchment.code}02")
-
-    def test_hotspot_suffix_expands_beyond_two_digits(self):
-        micro_catchment = self._create_micro_catchment("Catchment")
-        Hotspot.objects.create(
-            code=f"{micro_catchment.code}99",
-            name="Existing",
-            micro_catchment=micro_catchment,
-            audit_user_id=-1,
-        )
-        village = self._location("V", "V100", self.gvh)
-
-        created = update_or_create_hotspot(
-            {
-                "name": "One hundred",
-                "micro_catchment_uuid": micro_catchment.uuid,
-                "village_uuids": [village.uuid],
-                "audit_user_id": -1,
-            },
-            self.user,
-        )
-
-        self.assertEqual(created.code, f"{micro_catchment.code}100")
-
-    def test_moved_hotspot_code_is_not_reused_in_original_catchment(self):
-        first_catchment = self._create_micro_catchment("First catchment")
-        second_catchment = self._create_micro_catchment("Second catchment")
-        first_village = self._location("V", "MOVE-V1", self.gvh)
-        second_village = self._location("V", "MOVE-V2", self.gvh)
-        moved_hotspot = update_or_create_hotspot(
-            {
-                "name": "Moved hotspot",
-                "micro_catchment_uuid": first_catchment.uuid,
-                "village_uuids": [first_village.uuid],
-                "audit_user_id": -1,
-            },
-            self.user,
-        )
-        original_code = moved_hotspot.code
-
-        update_or_create_hotspot(
-            {
-                "uuid": moved_hotspot.uuid,
-                "name": moved_hotspot.name,
-                "micro_catchment_uuid": second_catchment.uuid,
-                "village_uuids": [first_village.uuid],
-                "audit_user_id": -1,
-            },
-            self.user,
-        )
-        replacement = update_or_create_hotspot(
-            {
-                "name": "Replacement hotspot",
-                "micro_catchment_uuid": first_catchment.uuid,
-                "village_uuids": [second_village.uuid],
-                "audit_user_id": -1,
-            },
-            self.user,
-        )
-
-        self.assertEqual(original_code, f"{first_catchment.code}01")
-        self.assertEqual(replacement.code, f"{first_catchment.code}02")
 
     def test_import_template_omits_micro_catchment_code(self):
         workbook = load_workbook(BytesIO(build_template_workbook(self.district)))
