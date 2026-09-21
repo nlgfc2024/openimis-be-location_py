@@ -3,6 +3,7 @@ from django_redis.cache import RedisCache
 import uuid
 from core.models import CachedManager
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models, connection
 from django.dispatch import receiver
 from django.db.models.signals import post_save, post_delete
@@ -1024,3 +1025,137 @@ class HealthFacilityMutation(core_models.UUIDModel):
     class Meta:
         managed = True
         db_table = "location_HealthFacilityMutation"
+
+
+class Cluster(core_models.VersionedModel):
+    """A cluster belonging to exactly one traditional authority."""
+
+    id = models.AutoField(db_column="ClusterId", primary_key=True)
+    uuid = models.CharField(
+        db_column="ClusterUUID", max_length=36, default=uuid.uuid4, unique=True
+    )
+    code = models.CharField(db_column="Code", max_length=50)
+    name = models.CharField(db_column="Name", max_length=255)
+    traditional_authority = models.ForeignKey(
+        Location,
+        on_delete=models.PROTECT,
+        db_column="TraditionalAuthorityId",
+        related_name="clusters",
+        limit_choices_to={"type": "D"},
+    )
+    audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    class Meta:
+        managed = True
+        db_table = "tblClusters"
+
+    def __str__(self):
+        return self.code or self.name
+
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        queryset = queryset if queryset is not None else cls.objects.all()
+        if getattr(user, "is_anonymous", True):
+            return queryset.none()
+        district_ids = allowed_micro_catchment_district_ids(user)
+        if district_ids is not None:
+            queryset = queryset.filter(traditional_authority__parent_id__in=district_ids)
+        return queryset
+
+    def clean(self):
+        super().clean()
+        if not self.traditional_authority_id:
+            raise ValidationError({
+                "traditional_authority": "A traditional authority is required."
+            })
+        if not Location.objects.filter(
+            pk=self.traditional_authority_id, type="D"
+        ).exists():
+            raise ValidationError({
+                "traditional_authority": "Select a traditional authority."
+            })
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        return super().save(*args, **kwargs)
+
+
+class Zone(core_models.VersionedModel, core_models.ExtendableModel):
+    id = models.AutoField(db_column="ZoneId", primary_key=True)
+    uuid = models.CharField(
+        db_column="ZoneUUID", max_length=36, default=uuid.uuid4, unique=True
+    )
+    code = models.CharField(db_column="ZoneCode", max_length=50, unique=True)
+    name = models.CharField(db_column="ZoneName", max_length=100)
+    description = models.TextField(
+        db_column="ZoneDescription", blank=True, null=True
+    )
+    audit_user_id = models.IntegerField(
+        db_column="AuditUserID", blank=True, null=True
+    )
+    cluster = models.ForeignKey(
+        "Cluster",
+        db_column="ClusterId",
+        on_delete=models.PROTECT,
+        related_name="zones",
+        null=True,
+        blank=True,
+    )
+    legacy_id = models.IntegerField(db_column="LegacyID", blank=True, null=True)
+
+    def __str__(self):
+        return self.code or self.name
+
+    @property
+    def villages(self):
+        # Villages linked through the ZoneVillage table (active links only).
+        return Location.objects.filter(
+            *Location.filter_validity(),
+            zone_links__zone=self,
+            zone_links__validity_to__isnull=True,
+        )
+
+    class Meta:
+        managed = True
+        db_table = "tblZones"
+
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        if isinstance(user, ResolveInfo):
+            user = user.context.user
+        if queryset is None:
+            queryset = cls.objects.filter(*cls.filter_validity())
+        if settings.ROW_SECURITY and user.is_anonymous:
+            return queryset.filter(id=-1)
+        district_ids = allowed_micro_catchment_district_ids(user)
+        if district_ids is not None:
+            return queryset.filter(cluster__traditional_authority__parent_id__in=district_ids)
+        return queryset
+
+
+class ZoneVillage(core_models.VersionedModel):
+    """Link table for Zone to its villages (Location type V).
+
+    Uses an explicit through-model (not a Django M2M) because the core pre_save
+    validator accesses M2M descriptors on unsaved VersionedModel instances,
+    which fails on create.
+    """
+    id = models.AutoField(db_column="ZoneVillageId", primary_key=True)
+    zone = models.ForeignKey(
+        Zone,
+        models.CASCADE,
+        db_column="ZoneId",
+        related_name="village_links",
+    )
+    location = models.ForeignKey(
+        Location,
+        models.CASCADE,
+        db_column="LocationId",
+        limit_choices_to={"type": "V"},
+        related_name="zone_links",
+    )
+    audit_user_id = models.IntegerField(db_column="AuditUserID", blank=True, null=True)
+
+    class Meta:
+        managed = True
+        db_table = "tblZoneVillages"

@@ -17,6 +17,7 @@ from location.gql_mutations import (
     CreateMicroCatchmentMutation,
     UpdateMicroCatchmentMutation,
     DeleteMicroCatchmentMutation,
+    CreateZoneMutation, UpdateZoneMutation, DeleteZoneMutation, get_zone_eligible_villages,
     CreateHotspotMutation,
     UpdateHotspotMutation,
     DeleteHotspotMutation,
@@ -30,6 +31,7 @@ from location.gql_queries import (
     LocationGQLType,
     HealthFacilityGQLType,
     MicroCatchmentGQLType,
+    ZoneGQLType,
     HotspotGQLType,
     CatchmentGQLType,
 
@@ -42,6 +44,7 @@ from location.models import (
     LocationMutation,
     HealthFacilityMutation,
     MicroCatchment,
+    Zone, Cluster,
     Hotspot,
     Catchment,
 )
@@ -53,7 +56,52 @@ from core import models as core_models
 from django.conf import settings
 
 
-class Query(graphene.ObjectType):
+from location.clusters import ClusterQuery, SaveClusterMutation, DeleteClusterMutation
+
+
+class Query(ClusterQuery, graphene.ObjectType):
+    zones = OrderedDjangoFilterConnectionField(
+        ZoneGQLType,
+        search=graphene.String(),
+        cluster_uuid=graphene.String(),
+        orderBy=graphene.List(of_type=graphene.String),
+    )
+
+    zone_eligible_villages = graphene.List(
+        LocationGQLType,
+        cluster_uuid=graphene.String(required=True),
+        zone_uuid=graphene.String(required=False),
+        description="Villages selectable for a zone in the given cluster.",
+    )
+
+    def resolve_zone_eligible_villages(self, info, cluster_uuid, zone_uuid=None, **kwargs):
+        if info.context.user.is_anonymous or not info.context.user.has_perms(LocationConfig.gql_query_zones_perms):
+            raise PermissionDenied(_("unauthorized"))
+        try:
+            cluster = Cluster.get_queryset(None, info.context.user).get(
+                uuid=cluster_uuid, validity_to__isnull=True
+            )
+        except Cluster.DoesNotExist:
+            return []
+        zone = None
+        if zone_uuid:
+            zone = Zone.get_queryset(None, info.context.user).filter(
+                uuid=zone_uuid, validity_to__isnull=True
+            ).first()
+        return get_zone_eligible_villages(cluster, zone).order_by("name")
+
+    def resolve_zones(self, info, **kwargs):
+        if info.context.user.is_anonymous or not info.context.user.has_perms(LocationConfig.gql_query_zones_perms):
+            raise PermissionDenied(_("unauthorized"))
+        query = Zone.get_queryset(None, info.context.user)
+        search = kwargs.get("search")
+        if search:
+            query = query.filter(Q(code__icontains=search) | Q(name__icontains=search))
+        cluster_uuid = kwargs.get("cluster_uuid")
+        if cluster_uuid:
+            query = query.filter(cluster__uuid=cluster_uuid)
+        return gql_optimizer.query(query.all(), info)
+
     health_facilities = OrderedDjangoFilterConnectionField(
         HealthFacilityGQLType,
         showHistory=graphene.Boolean(),
@@ -121,7 +169,7 @@ class Query(graphene.ObjectType):
     )
 
     def resolve_hotspot_eligible_villages(self, info, micro_catchment_uuid, hotspot_uuid=None, **kwargs):
-        if info.context.user.is_anonymous:
+        if info.context.user.is_anonymous or not info.context.user.has_perms(LocationConfig.gql_query_hotspots_perms):
             raise PermissionDenied(_("unauthorized"))
         try:
             micro_catchment = MicroCatchment.get_queryset(None, info.context.user).get(
@@ -137,7 +185,7 @@ class Query(graphene.ObjectType):
         return get_hotspot_eligible_villages(micro_catchment, hotspot).order_by("name")
 
     def resolve_hotspots(self, info, **kwargs):
-        if info.context.user.is_anonymous:
+        if info.context.user.is_anonymous or not info.context.user.has_perms(LocationConfig.gql_query_hotspots_perms):
             raise PermissionDenied(_("unauthorized"))
         query = Hotspot.get_queryset(None, info.context.user)
         return gql_optimizer.query(query.all(), info)
@@ -290,6 +338,11 @@ class Query(graphene.ObjectType):
 
 
 class Mutation(graphene.ObjectType):
+    save_cluster = SaveClusterMutation.Field()
+    delete_cluster = DeleteClusterMutation.Field()
+    create_zone = CreateZoneMutation.Field()
+    update_zone = UpdateZoneMutation.Field()
+    delete_zone = DeleteZoneMutation.Field()
     create_location = CreateLocationMutation.Field()
     update_location = UpdateLocationMutation.Field()
     delete_location = DeleteLocationMutation.Field()

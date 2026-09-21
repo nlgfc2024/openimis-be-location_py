@@ -3,6 +3,18 @@ from django.apps import AppConfig
 MODULE_NAME = "location"
 
 DEFAULT_CFG = {
+    "gql_query_hotspots_perms": ["121925"],
+    "gql_mutation_create_hotspots_perms": ["121926"],
+    "gql_mutation_edit_hotspots_perms": ["121927"],
+    "gql_mutation_delete_hotspots_perms": ["121928"],
+    "gql_query_clusters_perms": ["121921"],
+    "gql_mutation_create_clusters_perms": ["121922"],
+    "gql_mutation_edit_clusters_perms": ["121923"],
+    "gql_mutation_delete_clusters_perms": ["121924"],
+    "gql_query_zones_perms": ["121931"],
+    "gql_mutation_create_zones_perms": ["121932"],
+    "gql_mutation_edit_zones_perms": ["121933"],
+    "gql_mutation_delete_zones_perms": ["121934"],
     "location_types": ["R", "D", "W", "V"],
     "gql_query_locations_perms": ["121901"],
     "gql_query_health_facilities_perms": ["121101"],
@@ -42,6 +54,18 @@ DEFAULT_CFG = {
 
 
 class LocationConfig(AppConfig):
+    gql_query_hotspots_perms = ["121925"]
+    gql_mutation_create_hotspots_perms = ["121926"]
+    gql_mutation_edit_hotspots_perms = ["121927"]
+    gql_mutation_delete_hotspots_perms = ["121928"]
+    gql_query_clusters_perms = ["121921"]
+    gql_mutation_create_clusters_perms = ["121922"]
+    gql_mutation_edit_clusters_perms = ["121923"]
+    gql_mutation_delete_clusters_perms = ["121924"]
+    gql_query_zones_perms = ["121931"]
+    gql_mutation_create_zones_perms = ["121932"]
+    gql_mutation_edit_zones_perms = ["121933"]
+    gql_mutation_delete_zones_perms = ["121934"]
     name = MODULE_NAME
 
     location_types = []
