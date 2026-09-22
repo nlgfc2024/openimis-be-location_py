@@ -5,7 +5,8 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from location.models import Catchment, CatchmentDistrict, Location
-from location.services import CatchmentService, generate_unique_catchment_code
+from core.code_generation import generate_unique_year_code
+from location.services import CatchmentService
 
 
 class AuditUser:
@@ -62,8 +63,10 @@ class CatchmentServiceTest(TestCase):
     def test_generated_code_retries_on_collision(self):
         self.service.update_or_create(self.payload(code="202612345"))
 
-        with mock.patch("location.services.random.randint", side_effect=[12345, 67890]):
-            code = generate_unique_catchment_code(Catchment, date(2026, 1, 1))
+        with mock.patch("core.code_generation.random.randint", side_effect=[12345, 67890]):
+            code = generate_unique_year_code(
+                Catchment, {"validity_to__isnull": True}, date(2026, 1, 1)
+            )
 
         self.assertEqual(code, "202667890")
 
