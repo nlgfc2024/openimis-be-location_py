@@ -8,6 +8,9 @@ from .models import (
     UserDistrict,
     MicroCatchment,
     Hotspot,
+    Zone,
+    ZoneVillage,
+    Cluster,
     HotspotVillage,
 )
 from django.contrib.auth.models import AnonymousUser
@@ -645,7 +648,7 @@ class CreateHotspotMutation(OpenIMISMutation):
         try:
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            if not user.has_perms(LocationConfig.gql_mutation_create_locations_perms):
+            if not user.has_perms(LocationConfig.gql_mutation_create_hotspots_perms):
                 raise PermissionDenied(_("unauthorized"))
 
             data["audit_user_id"] = user.id_for_audit
@@ -676,7 +679,7 @@ class UpdateHotspotMutation(OpenIMISMutation):
         try:
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            if not user.has_perms(LocationConfig.gql_mutation_edit_locations_perms):
+            if not user.has_perms(LocationConfig.gql_mutation_edit_hotspots_perms):
                 raise PermissionDenied(_("unauthorized"))
 
             data["audit_user_id"] = user.id_for_audit
@@ -706,7 +709,7 @@ class DeleteHotspotMutation(OpenIMISMutation):
     @classmethod
     def async_mutate(cls, user, **data):
         try:
-            if not user.has_perms(LocationConfig.gql_mutation_delete_locations_perms):
+            if not user.has_perms(LocationConfig.gql_mutation_delete_hotspots_perms):
                 raise PermissionDenied(_("unauthorized"))
             hotspot = Hotspot.get_queryset(None, user).get(
                 uuid=data["uuid"], validity_to__isnull=True
@@ -835,3 +838,235 @@ class DeleteCatchmentMutation(OpenIMISMutation):
                 % {"code": data.get("code", "unknown")},
                 "detail": str(exc),
             }]
+
+
+class ZoneInputType(OpenIMISMutation.Input):
+    id = graphene.Int(required=False, read_only=True)
+    uuid = graphene.String(required=False)
+    code = graphene.String(required=False)
+    name = graphene.String(required=True)
+    description = graphene.String(required=False)
+    cluster_uuid = graphene.String(required=True)
+    village_uuids = graphene.List(graphene.String, required=False)
+
+
+def get_zone_eligible_villages(cluster, zone=None):
+    """
+    Villages under the selected Cluster's Traditional Authority.
+    """
+    gvh_locations = Location.objects.filter(
+        *Location.filter_validity(),
+        parent=cluster.traditional_authority,
+    )
+    villages = Location.objects.filter(
+        *Location.filter_validity(),
+        type="V",
+        parent__in=gvh_locations,
+    )
+    assigned_villages = ZoneVillage.objects.filter(
+        validity_to__isnull=True,
+        zone__validity_to__isnull=True,
+    )
+    if zone:
+        assigned_villages = assigned_villages.exclude(zone=zone)
+    return villages.exclude(
+        id__in=assigned_villages.values_list("location_id", flat=True)
+    )
+
+
+@transaction.atomic
+def update_or_create_zone(data, user):
+    if "client_mutation_id" in data:
+        data.pop("client_mutation_id")
+    if "client_mutation_label" in data:
+        data.pop("client_mutation_label")
+
+    cluster_uuid = data.pop("cluster_uuid", None)
+    village_uuids = data.pop("village_uuids", None)
+    if village_uuids is not None:
+        village_uuids = list(dict.fromkeys(village_uuids or []))
+
+    if not cluster_uuid:
+        raise ValidationError("A cluster is required")
+
+    data["name"] = (data.get("name") or "").strip()
+    if not data["name"]:
+        raise ValidationError("A zone name is required")
+
+    try:
+        cluster = Cluster.get_queryset(None, user).select_for_update().get(
+            uuid=cluster_uuid, validity_to__isnull=True
+        )
+    except Cluster.DoesNotExist:
+        raise ValidationError("Select an available cluster")
+
+    current_zone = None
+    if data.get("uuid"):
+        current_zone = Zone.get_queryset(None, user).filter(
+            uuid=data["uuid"], validity_to__isnull=True
+        ).first()
+        if current_zone is None:
+            raise PermissionDenied(_("unauthorized"))
+        if village_uuids is None:
+            village_uuids = list(current_zone.villages.values_list("uuid", flat=True))
+    if not village_uuids:
+        raise ValidationError("At least one village is required for a zone")
+    villages = None
+    if village_uuids is not None:
+        eligible_villages = get_zone_eligible_villages(cluster, current_zone)
+        villages = list(eligible_villages.filter(uuid__in=village_uuids))
+        if len(villages) != len(village_uuids):
+            raise ValidationError("Selected villages are not available for this cluster")
+
+    # A village must belong to only one zone: reject duplicate active links.
+    if villages is not None:
+        conflicting = (
+            Zone.objects.filter(
+                validity_to__isnull=True,
+                village_links__location__in=villages,
+                village_links__validity_to__isnull=True,
+            )
+            .exclude(uuid=data.get("uuid"))
+            .distinct()
+        )
+        if conflicting.exists():
+            raise ValidationError("A selected village is already assigned to another active zone")
+
+    data["cluster"] = cluster
+
+    if not data.get("uuid"):
+        prefix = cluster.code
+        next_number = 1
+        for existing_code in Zone.objects.filter(
+            code__startswith=prefix
+        ).values_list("code", flat=True):
+            suffix = existing_code[len(prefix):]
+            if suffix.isdigit():
+                next_number = max(next_number, int(suffix) + 1)
+        data["code"] = f"{prefix}{next_number:02d}"
+        zone = Zone.objects.create(**data)
+    else:
+        # Moving or editing a zone must not rewrite its identifier.
+        data.pop("code", None)
+        zone = Zone.get_queryset(None, user).get(
+            uuid=data["uuid"], validity_to__isnull=True
+        )
+        for field, value in data.items():
+            setattr(zone, field, value)
+        zone.save()
+
+    if villages is not None:
+        _set_zone_villages(zone, villages, data.get("audit_user_id"))
+    return zone
+
+
+def _set_zone_villages(zone, villages, audit_user_id):
+    from core.utils import TimeUtils
+
+    village_ids = {v.id for v in villages}
+    # Drop links that are no longer selected.
+    zone.village_links.exclude(location_id__in=village_ids).delete()
+    existing_ids = set(zone.village_links.values_list("location_id", flat=True))
+    for village in villages:
+        if village.id not in existing_ids:
+            ZoneVillage.objects.create(
+                zone=zone,
+                location=village,
+                audit_user_id=audit_user_id,
+                validity_from=TimeUtils.now(),
+            )
+
+
+class CreateZoneMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "CreateZoneMutation"
+
+    class Input(ZoneInputType):
+        pass
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            if not user.has_perms(LocationConfig.gql_mutation_create_zones_perms):
+                raise PermissionDenied(_("unauthorized"))
+
+            data["audit_user_id"] = user.id_for_audit
+            from core.utils import TimeUtils
+
+            data["validity_from"] = TimeUtils.now()
+            update_or_create_zone(data, user)
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_create_zone")
+                    % {"code": data.get("code", "")},
+                    "detail": str(exc),
+                }
+            ]
+
+
+class UpdateZoneMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "UpdateZoneMutation"
+
+    class Input(ZoneInputType):
+        pass
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if type(user) is AnonymousUser or not user.id:
+                raise ValidationError(_("mutation.authentication_required"))
+            if not user.has_perms(LocationConfig.gql_mutation_edit_zones_perms):
+                raise PermissionDenied(_("unauthorized"))
+
+            data["audit_user_id"] = user.id_for_audit
+            from core.utils import TimeUtils
+
+            data["validity_from"] = TimeUtils.now()
+            update_or_create_zone(data, user)
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_update_zone")
+                    % {"code": data.get("code", "")},
+                    "detail": str(exc),
+                }
+            ]
+
+
+class DeleteZoneMutation(OpenIMISMutation):
+    _mutation_module = "location"
+    _mutation_class = "DeleteZoneMutation"
+
+    class Input(OpenIMISMutation.Input):
+        uuid = graphene.String()
+        code = graphene.String()
+
+    @classmethod
+    def async_mutate(cls, user, **data):
+        try:
+            if not user.has_perms(LocationConfig.gql_mutation_delete_zones_perms):
+                raise PermissionDenied(_("unauthorized"))
+            zone = Zone.get_queryset(None, user).get(
+                uuid=data["uuid"], validity_to__isnull=True
+            )
+
+            from core import datetime
+
+            now = datetime.datetime.now()
+            zone.validity_to = now
+            zone.save()
+            return None
+        except Exception as exc:
+            return [
+                {
+                    "message": _("location.mutation.failed_to_delete_zone")
+                    % {"code": data.get("code", "")},
+                    "detail": str(exc),
+                }
+            ]

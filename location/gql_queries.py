@@ -18,6 +18,7 @@ from location.models import (
     MicroCatchmentTA,
     MicroCatchmentGVH,
     Hotspot,
+    Zone,
     Catchment,
     CatchmentDistrict,
 )
@@ -322,3 +323,43 @@ class CatchmentGQLType(DjangoObjectType):
     @classmethod
     def get_queryset(cls, queryset, info):
         return Catchment.get_queryset(queryset, info.context.user)
+
+
+class ZoneGQLType(DjangoObjectType):
+    client_mutation_id = graphene.String()
+    villages = graphene.List(LocationGQLType)
+
+    class Meta:
+        model = Zone
+        interfaces = (graphene.relay.Node,)
+        filter_fields = {
+            "id": ["exact"],
+            "uuid": ["exact"],
+            "code": ["exact", "istartswith", "icontains", "iexact", "ne"],
+            "name": ["exact", "istartswith", "icontains", "iexact", "ne"],
+            "cluster__uuid": ["exact", "in"],
+            "cluster__name": ["exact", "istartswith", "icontains", "iexact"],
+            "cluster__traditional_authority__uuid": ["exact", "in"],
+            "cluster__traditional_authority__parent__uuid": ["exact", "in"],
+            "village_links__location__uuid": ["exact", "in"],
+            "village_links__location__parent__uuid": ["exact", "in"],
+            "village_links__location__parent__parent__uuid": ["exact", "in"],
+            "village_links__location__parent__parent__parent__uuid": ["exact", "in"],
+        }
+        connection_class = ExtendedConnection
+
+    def resolve_villages(self, info):
+        if not info.context.user.is_authenticated:
+            raise PermissionDenied(_("unauthorized"))
+        return self.villages
+
+    def resolve_client_mutation_id(self, info):
+        if not info.context.user.is_authenticated:
+            raise PermissionDenied(_("unauthorized"))
+        return None
+
+    @classmethod
+    def get_queryset(cls, queryset, info):
+        from .clusters import require_permission
+        require_permission(info.context.user, LocationConfig.gql_query_zones_perms)
+        return Zone.get_queryset(queryset, info.context.user)
