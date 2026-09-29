@@ -229,6 +229,9 @@ class Query(ClusterQuery, graphene.ObjectType):
         # if not info.context.user.has_perms(LocationConfig.gql_query_locations_perms):
         if info.context.user.is_anonymous:
             raise PermissionDenied(_("unauthorized"))
+        return Location.get_queryset(None, info.context.user).filter(
+            *Location.filter_validity(**kwargs)
+        )
 
     def resolve_locations_all(self, info, **kwargs):
         if info.context.user.is_anonymous:
