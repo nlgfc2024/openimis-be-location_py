@@ -421,7 +421,7 @@ class CreateMicroCatchmentMutation(OpenIMISMutation):
         try:
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            if not user.has_perms(LocationConfig.gql_mutation_create_locations_perms):
+            if not user.has_perms(LocationConfig.gql_mutation_create_micro_catchments_perms):
                 raise PermissionDenied(_("unauthorized"))
 
             data["audit_user_id"] = user.id_for_audit
@@ -452,7 +452,7 @@ class UpdateMicroCatchmentMutation(OpenIMISMutation):
         try:
             if type(user) is AnonymousUser or not user.id:
                 raise ValidationError(_("mutation.authentication_required"))
-            if not user.has_perms(LocationConfig.gql_mutation_edit_locations_perms):
+            if not user.has_perms(LocationConfig.gql_mutation_edit_micro_catchments_perms):
                 raise PermissionDenied(_("unauthorized"))
 
             data["audit_user_id"] = user.id_for_audit

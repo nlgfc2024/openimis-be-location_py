@@ -26,6 +26,8 @@ DEFAULT_CFG = {
     "gql_mutation_create_health_facilities_perms": ["121102"],
     "gql_mutation_edit_health_facilities_perms": ["121103"],
     "gql_mutation_delete_health_facilities_perms": ["121104"],
+    "gql_mutation_create_micro_catchments_perms": ["159001"],
+    "gql_mutation_edit_micro_catchments_perms": ["159002"],
     "gql_mutation_delete_micro_catchments_perms": ["159003"],
     "import_micro_catchments_perms": ["159004"],
     "export_micro_catchments_perms": ["159005"],
@@ -79,6 +81,8 @@ class LocationConfig(AppConfig):
     gql_mutation_create_health_facilities_perms = []
     gql_mutation_edit_health_facilities_perms = []
     gql_mutation_delete_health_facilities_perms = []
+    gql_mutation_create_micro_catchments_perms = ["159001"]
+    gql_mutation_edit_micro_catchments_perms = ["159002"]
     gql_mutation_delete_micro_catchments_perms = ["159003"]
     import_micro_catchments_perms = ["159004"]
     export_micro_catchments_perms = ["159005"]
