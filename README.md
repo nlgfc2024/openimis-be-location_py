@@ -88,6 +88,10 @@ Lists, UUID/node lookups, and nested district links enforce this policy even whe
 the client supplies no district filter. Catchment search permission is still
 required. Shared catchments appear once and show only authorized districts.
 
+GraphQL reads reuse the district assignment lookup on the request context,
+including nested district fields. Subsequent requests and mutation services that
+receive a user directly read assignments afresh.
+
 Creating a catchment requires access to every requested district. Editing or
 deleting an existing catchment requires access to every district with an active
 link to it. A user who can view only part of a shared catchment cannot change its

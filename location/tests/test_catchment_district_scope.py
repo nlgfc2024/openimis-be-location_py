@@ -4,7 +4,9 @@ from unittest.mock import patch
 import graphene
 from django.contrib.auth.models import AnonymousUser
 from django.core.exceptions import PermissionDenied
+from django.db import connection
 from django.test import RequestFactory, TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from graphql_relay import to_global_id
 
 from core.test_helpers import create_test_interactive_user, create_test_role
@@ -63,8 +65,9 @@ class CatchmentDistrictScopeTest(TestCase):
         request.user = user or self.user
         return request
 
-    def query(self, selection, user=None):
-        result = graphene.Schema(query=Query).execute(selection, context_value=self.request(user))
+    def query(self, selection, user=None, request=None):
+        context = request if request is not None else self.request(user)
+        result = graphene.Schema(query=Query).execute(selection, context_value=context)
         self.assertIsNone(result.errors, result.errors)
         return result.data
 
@@ -89,6 +92,70 @@ class CatchmentDistrictScopeTest(TestCase):
         self.assertEqual(set(rows), {self.only_a.code, self.shared.code})
         self.assertEqual(rows[self.shared.code]["districts"], [{"code": self.a.code}])
         self.assertEqual(rows[self.shared.code]["districtLinks"], [{"location": {"code": self.a.code}}])
+
+    @staticmethod
+    def assignment_query_count(queries):
+        return sum('"tblUsersDistricts"' in query["sql"] for query in queries.captured_queries)
+
+    def test_list_and_nested_districts_share_one_assignment_lookup(self):
+        for number in range(5):
+            self.catchment(f"SCOPE-EXTRA-{number}", self.a)
+        selection = f"""{{
+            all: catchments {{ edges {{ node {{
+                code districts {{ code }} districtLinks {{ location {{ code }} }}
+            }} }} }}
+            filtered: catchments(districtUuid: "{self.a.uuid}") {{ edges {{ node {{ code districts {{ code }} }} }} }}
+        }}"""
+        with CaptureQueriesContext(connection) as queries:
+            data = self.query(selection)
+        self.assertEqual(len(data["all"]["edges"]), 7)
+        self.assertEqual(len(data["filtered"]["edges"]), 7)
+        self.assertEqual(self.assignment_query_count(queries), 1)
+        for edge in data["all"]["edges"]:
+            self.assertEqual(edge["node"]["districts"], [{"code": self.a.code}])
+
+    def test_empty_assignment_scope_is_cached_for_the_request(self):
+        self.assignment.delete()
+        selection = "{ first: catchments { totalCount } second: catchments { totalCount } }"
+        with CaptureQueriesContext(connection) as queries:
+            data = self.query(selection)
+        self.assertEqual(data, {"first": {"totalCount": 0}, "second": {"totalCount": 0}})
+        self.assertEqual(self.assignment_query_count(queries), 1)
+
+    def test_new_request_and_raw_user_lookups_see_changed_assignments(self):
+        selection = "{ catchments { edges { node { code } } } }"
+        first_request = self.request()
+        self.query(selection, request=first_request)
+        self.assignment.location = self.b
+        self.assignment.save()
+
+        # Services pass a raw user, so they must not reuse a previous read cache.
+        self.assertCountEqual(Catchment.get_queryset(None, self.user), [self.only_b, self.shared])
+        with CaptureQueriesContext(connection) as queries:
+            data = self.query(selection, request=self.request())
+        self.assertEqual(self.assignment_query_count(queries), 1)
+        codes = {edge["node"]["code"] for edge in data["catchments"]["edges"]}
+        self.assertEqual(codes, {self.only_b.code, self.shared.code})
+
+    def test_changing_security_bypass_does_not_reuse_unrestricted_scope(self):
+        request = self.request()
+        selection = "{ catchments { totalCount } }"
+        with patch.object(LocationConfig, "no_location_check", True):
+            self.assertEqual(self.query(selection, request=request)["catchments"]["totalCount"], 3)
+        self.assertEqual(self.query(selection, request=request)["catchments"]["totalCount"], 2)
+
+    def test_changing_request_user_does_not_reuse_another_users_scope(self):
+        other_user = create_test_interactive_user(
+            username="catchment-other", roles=[self.user.i_user.role_id],
+        )
+        UserDistrict.objects.create(user=other_user.i_user, location=self.b, audit_user_id=-1)
+        request = self.request()
+        selection = "{ catchments { edges { node { code } } } }"
+        self.query(selection, request=request)
+        request.user = other_user
+        data = self.query(selection, request=request)
+        codes = {edge["node"]["code"] for edge in data["catchments"]["edges"]}
+        self.assertEqual(codes, {self.only_b.code, self.shared.code})
 
     def test_search_and_explicit_other_district_cannot_broaden_access(self):
         for args in [f'search: "{self.only_b.code}"', f'districtUuid: "{self.b.uuid}"', f'uuid: "{self.only_b.uuid}"']:

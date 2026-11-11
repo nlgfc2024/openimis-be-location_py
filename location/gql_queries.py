@@ -300,7 +300,7 @@ class CatchmentDistrictGQLType(DjangoObjectType):
     def get_queryset(cls, queryset, info):
         if not info.context.user.has_perms(LocationConfig.gql_query_catchments_perms):
             raise PermissionDenied(_("unauthorized"))
-        return CatchmentDistrict.get_queryset(queryset, info.context.user)
+        return CatchmentDistrict.get_queryset(queryset, info)
 
 
 class CatchmentGQLType(DjangoObjectType):
@@ -326,7 +326,7 @@ class CatchmentGQLType(DjangoObjectType):
             type="R",
             validity_to__isnull=True,
         )
-        district_ids = allowed_micro_catchment_district_ids(info.context.user)
+        district_ids = allowed_micro_catchment_district_ids(info)
         if district_ids is not None:
             query = query.filter(id__in=district_ids)
         return query.order_by("name")
@@ -335,7 +335,7 @@ class CatchmentGQLType(DjangoObjectType):
     def get_queryset(cls, queryset, info):
         if not info.context.user.has_perms(LocationConfig.gql_query_catchments_perms):
             raise PermissionDenied(_("unauthorized"))
-        return Catchment.get_queryset(queryset, info.context.user)
+        return Catchment.get_queryset(queryset, info)
 
 
 class ZoneGQLType(DjangoObjectType):

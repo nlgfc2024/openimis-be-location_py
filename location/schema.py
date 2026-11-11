@@ -335,13 +335,13 @@ class Query(ClusterQuery, graphene.ObjectType):
         search = kwargs.get("search")
         district_uuid = kwargs.get("district_uuid")
 
-        query = Catchment.get_queryset(None, info.context.user)
+        query = Catchment.get_queryset(None, info)
         if not show_history:
             query = query.filter(validity_to__isnull=True)
         if search:
             query = query.filter(Q(code__icontains=search) | Q(name__icontains=search))
         if district_uuid:
-            links = CatchmentDistrict.get_queryset(None, info.context.user).filter(
+            links = CatchmentDistrict.get_queryset(None, info).filter(
                 location__uuid=district_uuid,
                 validity_to__isnull=True,
             )
