@@ -150,6 +150,7 @@ class Query(ClusterQuery, graphene.ObjectType):
     )
     micro_catchments = OrderedDjangoFilterConnectionField(
         MicroCatchmentGQLType,
+        benefit_plan_id=graphene.ID(),
         showHistory=graphene.Boolean(),
         orderBy=graphene.List(of_type=graphene.String),
     )
@@ -316,6 +317,12 @@ class Query(ClusterQuery, graphene.ObjectType):
         query = MicroCatchment.get_queryset(None, info.context.user)
         if not show_history:
             query = query.filter(validity_to__isnull=True)
+        benefit_plan_id = kwargs.get("benefit_plan_id")
+        if benefit_plan_id is not None:
+            query = query.filter(
+                projects__benefit_plan_id=benefit_plan_id,
+                projects__is_deleted=False,
+            ).distinct()
 
         return gql_optimizer.query(query.all(), info)
 
