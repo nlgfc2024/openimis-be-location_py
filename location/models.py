@@ -971,6 +971,17 @@ class Catchment(core_models.VersionedModel):
             user = user.context.user
         if settings.ROW_SECURITY and user.is_anonymous:
             return queryset.filter(id=-1)
+        district_ids = allowed_micro_catchment_district_ids(user)
+        if district_ids is not None:
+            # An IN subquery avoids duplicate catchments for multiple assignments
+            # and permits select_for_update() on the outer query during mutations.
+            links = CatchmentDistrict.objects.filter(
+                validity_to__isnull=True,
+                location_id__in=district_ids,
+                location__type="R",
+                location__validity_to__isnull=True,
+            )
+            return queryset.filter(pk__in=links.values("catchment_id"))
         return queryset
 
 
@@ -990,6 +1001,19 @@ class CatchmentDistrict(core_models.VersionedModel):
         limit_choices_to={"type": "R"},
     )
     audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        queryset = queryset if queryset is not None else cls.objects
+        district_ids = allowed_micro_catchment_district_ids(user)
+        if district_ids is not None:
+            return queryset.filter(
+                validity_to__isnull=True,
+                location_id__in=district_ids,
+                location__type="R",
+                location__validity_to__isnull=True,
+            )
+        return queryset
 
     class Meta:
         managed = True

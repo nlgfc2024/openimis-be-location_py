@@ -21,6 +21,7 @@ from location.models import (
     Zone,
     Catchment,
     CatchmentDistrict,
+    allowed_micro_catchment_district_ids,
 )
 from django.db.models import Field
 
@@ -295,6 +296,12 @@ class CatchmentDistrictGQLType(DjangoObjectType):
             "location": ["exact"],
         }
 
+    @classmethod
+    def get_queryset(cls, queryset, info):
+        if not info.context.user.has_perms(LocationConfig.gql_query_catchments_perms):
+            raise PermissionDenied(_("unauthorized"))
+        return CatchmentDistrict.get_queryset(queryset, info.context.user)
+
 
 class CatchmentGQLType(DjangoObjectType):
     districts = graphene.List(LocationGQLType)
@@ -313,15 +320,21 @@ class CatchmentGQLType(DjangoObjectType):
     def resolve_districts(self, info):
         if not info.context.user.is_authenticated:
             raise PermissionDenied(_("unauthorized"))
-        return Location.objects.filter(
+        query = Location.objects.filter(
             catchment_links__catchment=self,
             catchment_links__validity_to__isnull=True,
             type="R",
             validity_to__isnull=True,
-        ).order_by("name")
+        )
+        district_ids = allowed_micro_catchment_district_ids(info.context.user)
+        if district_ids is not None:
+            query = query.filter(id__in=district_ids)
+        return query.order_by("name")
 
     @classmethod
     def get_queryset(cls, queryset, info):
+        if not info.context.user.has_perms(LocationConfig.gql_query_catchments_perms):
+            raise PermissionDenied(_("unauthorized"))
         return Catchment.get_queryset(queryset, info.context.user)
 
 

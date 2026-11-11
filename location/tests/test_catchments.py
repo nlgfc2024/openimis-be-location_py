@@ -2,7 +2,7 @@ from datetime import date
 from unittest import mock
 
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from location.models import Catchment, CatchmentDistrict, Location
 from core.code_generation import generate_unique_year_code
@@ -13,6 +13,7 @@ class AuditUser:
     id_for_audit = 1
 
 
+@override_settings(ROW_SECURITY=False)
 class CatchmentServiceTest(TestCase):
     def setUp(self):
         self.district_1 = Location.objects.create(
