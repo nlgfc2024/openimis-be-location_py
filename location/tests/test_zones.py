@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 
 from location.clusters import Cluster
 from location.gql_mutations import update_or_create_zone
-from location.models import Location, Zone
+from location.models import Location
 
 
 @override_settings(ROW_SECURITY=False)
