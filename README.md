@@ -75,5 +75,29 @@ python manage.py configure_jobs_now_locations --role-id ROLE_ID
 python manage.py configure_jobs_now_locations --role-id ROLE_ID --apply
 ```
 
+## Catchment district scope
+
+Catchments use the same assigned-district policy as micro-catchments. With row
+security enabled, an active Malawi District (`R`) assignment grants that district;
+a Traditional Authority (`D`) assignment grants its parent district. Users without
+active assignments see no catchments. Superusers, `ROW_SECURITY=False`, and
+`no_location_check=True` retain unrestricted access.
+
+A catchment is visible if it has an active link to an allowed active district.
+Lists, UUID/node lookups, and nested district links enforce this policy even when
+the client supplies no district filter. Catchment search permission is still
+required. Shared catchments appear once and show only authorized districts.
+
+GraphQL reads reuse the district assignment lookup on the request context,
+including nested district fields. Subsequent requests and mutation services that
+receive a user directly read assignments afresh.
+
+Creating a catchment requires access to every requested district. Editing or
+deleting an existing catchment requires access to every district with an active
+link to it. A user who can view only part of a shared catchment cannot change its
+name, replace its district links, or delete it. Assign the remaining districts or
+use an unrestricted administrator for those operations. No schema migration is
+needed.
+
 ## openIMIS Modules Dependencies
 * core.models.InteractiveUser

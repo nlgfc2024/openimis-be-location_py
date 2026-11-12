@@ -47,6 +47,7 @@ from location.models import (
     Zone, Cluster,
     Hotspot,
     Catchment,
+    CatchmentDistrict,
 )
 from location.services import LocationService, HealthFacilityService
 from location.apps import LocationConfig
@@ -334,16 +335,17 @@ class Query(ClusterQuery, graphene.ObjectType):
         search = kwargs.get("search")
         district_uuid = kwargs.get("district_uuid")
 
-        query = Catchment.get_queryset(None, info.context.user)
+        query = Catchment.get_queryset(None, info)
         if not show_history:
             query = query.filter(validity_to__isnull=True)
         if search:
             query = query.filter(Q(code__icontains=search) | Q(name__icontains=search))
         if district_uuid:
-            query = query.filter(
-                district_links__location__uuid=district_uuid,
-                district_links__validity_to__isnull=True,
+            links = CatchmentDistrict.get_queryset(None, info).filter(
+                location__uuid=district_uuid,
+                validity_to__isnull=True,
             )
+            query = query.filter(pk__in=links.values("catchment_id"))
         return gql_optimizer.query(query.distinct(), info)
 
 

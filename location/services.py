@@ -445,20 +445,34 @@ class CatchmentService:
             )
         return valid_ids
 
+    def _get_for_mutation(self, catchment_uuid):
+        catchment = Catchment.get_queryset(None, self.user).select_for_update().get(
+            uuid=catchment_uuid,
+            validity_to__isnull=True,
+        )
+        district_ids = allowed_micro_catchment_district_ids(self.user)
+        if district_ids is not None and catchment.district_links.filter(
+            validity_to__isnull=True,
+        ).exclude(location_id__in=district_ids).exists():
+            # A shared catchment is readable through an assigned district, but
+            # changing its name or links would also affect other districts.
+            raise PermissionDenied(_("unauthorized"))
+        return catchment
+
     @transaction.atomic
     @register_service_signal("catchment_service.update_or_create")
     def update_or_create(self, data):
         district_ids = self.validate_districts(data.pop("district_ids", []))
+        allowed_ids = allowed_micro_catchment_district_ids(self.user)
+        if allowed_ids is not None and not district_ids.issubset(allowed_ids):
+            raise PermissionDenied(_("unauthorized"))
         catchment_uuid = data.pop("uuid", None)
         if not catchment_uuid and not data.get("code"):
             data["code"] = generate_unique_year_code(Catchment, {"validity_to__isnull": True})
         self.check_unique_code(data["code"], exclude_uuid=catchment_uuid)
 
         if catchment_uuid:
-            catchment = Catchment.objects.select_for_update().get(
-                uuid=catchment_uuid,
-                validity_to__isnull=True,
-            )
+            catchment = self._get_for_mutation(catchment_uuid)
             catchment.save_history()
             catchment.code = data["code"]
             catchment.name = data["name"]
@@ -499,10 +513,7 @@ class CatchmentService:
         from core.utils import TimeUtils
 
         now = TimeUtils.now()
-        catchment = Catchment.objects.select_for_update().get(
-            uuid=catchment_uuid,
-            validity_to__isnull=True,
-        )
+        catchment = self._get_for_mutation(catchment_uuid)
         catchment.district_links.filter(validity_to__isnull=True).update(
             validity_to=now,
             audit_user_id=self.user.id_for_audit,

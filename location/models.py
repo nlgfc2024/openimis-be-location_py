@@ -20,9 +20,25 @@ cache = caches["location"]
 
 
 def allowed_micro_catchment_district_ids(user):
-    """Return allowed Malawi district (R) IDs, or None when unrestricted."""
+    """Return allowed Malawi district (R) IDs, or None when unrestricted.
+
+    GraphQL lookups reuse scope on their request; raw-user calls stay fresh.
+    """
     if isinstance(user, ResolveInfo):
-        user = user.context.user
+        context = user.context
+        request_user = context.user
+        key = (
+            request_user,
+            settings.ROW_SECURITY,
+            LocationConfig.no_location_check,
+            getattr(request_user, "is_superuser", False),
+        )
+        scope = getattr(context, "_location_district_scope", None)
+        if scope is None or scope[0] != key:
+            # Raw-user calls (including mutation services) always re-read scope.
+            scope = (key, allowed_micro_catchment_district_ids(request_user))
+            context._location_district_scope = scope
+        return scope[1]
     if (
         not settings.ROW_SECURITY
         or LocationConfig.no_location_check
@@ -967,10 +983,22 @@ class Catchment(core_models.VersionedModel):
     @classmethod
     def get_queryset(cls, queryset, user):
         queryset = queryset if queryset is not None else cls.objects
+        scope_user = user
         if isinstance(user, ResolveInfo):
             user = user.context.user
         if settings.ROW_SECURITY and user.is_anonymous:
             return queryset.filter(id=-1)
+        district_ids = allowed_micro_catchment_district_ids(scope_user)
+        if district_ids is not None:
+            # An IN subquery avoids duplicate catchments for multiple assignments
+            # and permits select_for_update() on the outer query during mutations.
+            links = CatchmentDistrict.objects.filter(
+                validity_to__isnull=True,
+                location_id__in=district_ids,
+                location__type="R",
+                location__validity_to__isnull=True,
+            )
+            return queryset.filter(pk__in=links.values("catchment_id"))
         return queryset
 
 
@@ -990,6 +1018,19 @@ class CatchmentDistrict(core_models.VersionedModel):
         limit_choices_to={"type": "R"},
     )
     audit_user_id = models.IntegerField(db_column="AuditUserID")
+
+    @classmethod
+    def get_queryset(cls, queryset, user):
+        queryset = queryset if queryset is not None else cls.objects
+        district_ids = allowed_micro_catchment_district_ids(user)
+        if district_ids is not None:
+            return queryset.filter(
+                validity_to__isnull=True,
+                location_id__in=district_ids,
+                location__type="R",
+                location__validity_to__isnull=True,
+            )
+        return queryset
 
     class Meta:
         managed = True
