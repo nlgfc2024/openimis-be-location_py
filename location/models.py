@@ -893,6 +893,44 @@ class MicroCatchment(core_models.VersionedModel):
         return queryset
 
 
+class MsrLocationReference(models.Model):
+    """Stable MSR identity and publication state; signed access URLs are transient."""
+
+    id = models.AutoField(primary_key=True)
+    source_instance = models.CharField(max_length=100)
+    msr_type = models.CharField(max_length=50)
+    msr_id = models.PositiveBigIntegerField()
+    code = models.CharField(max_length=100)
+    name = models.CharField(max_length=255)
+    district_msr_id = models.PositiveBigIntegerField(null=True, blank=True)
+    parents = models.JSONField(default=list, blank=True)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    point_status = models.CharField(max_length=30, null=True, blank=True)
+    is_micro = models.BooleanField(null=True, blank=True)
+    geometry_relation = models.CharField(max_length=50, null=True, blank=True)
+    geometry_sha256 = models.CharField(max_length=64, null=True, blank=True)
+    geometry_source = models.CharField(max_length=255, null=True, blank=True)
+    geojson_updated_at = models.DateTimeField(null=True, blank=True)
+    revision = models.PositiveBigIntegerField(default=0)
+    boundary_status = models.CharField(max_length=30, default="unavailable")
+    location = models.ForeignKey(Location, models.PROTECT, null=True, blank=True, related_name="msr_references")
+    micro_catchment = models.ForeignKey(
+        MicroCatchment, models.PROTECT, null=True, blank=True, related_name="msr_references",
+    )
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "location_msr_reference"
+        constraints = [
+            models.UniqueConstraint(fields=["source_instance", "msr_type", "msr_id"], name="location_msr_identity_unique"),
+            models.CheckConstraint(
+                check=Q(location__isnull=True) | Q(micro_catchment__isnull=True),
+                name="location_msr_single_target",
+            ),
+        ]
+
+
 class MicroCatchmentTA(core_models.VersionedModel):
     """Link table for Micro Catchment to Traditional Authority (Location type D)"""
     id = models.AutoField(db_column="MicroCatchmentTAId", primary_key=True)
