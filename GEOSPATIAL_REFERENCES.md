@@ -40,6 +40,16 @@ PostgreSQL schema within a rolled-back transaction. Application migrations have
 not been applied by this chunk. Use `manage.py migrate --plan` to review the
 pending location migrations before applying them.
 
-Next chunk: connect the v3 transport, adapter, dedicated writer and background
-staging; import verified MSR memberships; add the synchronization UI. GraphQL/map
-exposure and live publication lifecycle verification follow in subsequent chunks.
+Chunk 3 adds `MsrCatchmentVillage` and migration `0034_msrcatchmentvillage`.
+`MsrReferenceWriter.replace_memberships(snapshots)` accepts complete verified
+endpoint responses (`catchment_id`, `revision`, `village_ids`). It validates the
+source instance, catchment classification and village district, rejects conflicting
+assignments, and atomically replaces memberships or moves villages between
+catchments. Empty successful responses clear memberships; failures and stale
+publication retries preserve previous assignments. These are MSR reference links,
+separate from existing CoreMIS TA/GVH associations.
+
+The MSR ETL module now connects the v3 source, dedicated adapter/writer, background
+staging and source-specific UI. See its `GEOSPATIAL_IMPLEMENTATION.md` for activation
+steps. GraphQL/map exposure and live publication lifecycle verification follow in
+subsequent chunks.

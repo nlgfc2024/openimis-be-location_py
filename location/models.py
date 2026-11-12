@@ -931,6 +931,18 @@ class MsrLocationReference(models.Model):
         ]
 
 
+class MsrCatchmentVillage(models.Model):
+    """Membership verified by MSR's relationship endpoint, never by containment."""
+
+    id = models.AutoField(primary_key=True)
+    catchment = models.ForeignKey(MsrLocationReference, models.CASCADE, related_name="village_memberships")
+    village = models.OneToOneField(MsrLocationReference, models.CASCADE, related_name="catchment_membership")
+    synced_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "location_msr_catchment_village"
+
+
 class MicroCatchmentTA(core_models.VersionedModel):
     """Link table for Micro Catchment to Traditional Authority (Location type D)"""
     id = models.AutoField(db_column="MicroCatchmentTAId", primary_key=True)

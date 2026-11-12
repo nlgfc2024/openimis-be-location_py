@@ -2,7 +2,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 
-from location.models import Location, MicroCatchment, MsrLocationReference
+from location.models import Location, MicroCatchment, MsrLocationReference, MsrCatchmentVillage
 from location.msr_reference import MsrReferenceWriter
 
 
@@ -135,3 +135,47 @@ class MsrReferenceTests(TestCase):
             MsrLocationReference.objects.create(source_instance="msr-malawi", msr_type="districts",
                                                 msr_id=13, code="213", name="Dedza",
                                                 location=loc, micro_catchment=micro)
+
+
+class MsrMembershipTests(TestCase):
+    def setUp(self):
+        self.writer = MsrReferenceWriter("msr-malawi")
+        gvh = {"id": 30, "type": "group_village_heads", "code": "GVH30", "name": "GVH",
+               "district_id": 13, "revision": 1,
+               "parents": [{"type": "traditional_authorities", "id": 24}, {"type": "districts", "id": 13}]}
+        village = {"id": 40, "type": "villages", "code": "V40", "name": "Village", "revision": 1,
+                   "district_id": 13, "parents": [{"type": "group_village_heads", "id": 30}, *gvh["parents"]]}
+        self.writer.push([district(), ta(), gvh, village, catchment(), catchment(id=668, code="MC668")])
+
+    def snapshot(self, villages, catchment_id=667, revision=1):
+        return {"catchment_id": catchment_id, "revision": revision, "village_ids": villages}
+
+    def test_repeated_snapshot_and_empty_removal(self):
+        self.writer.replace_memberships([self.snapshot([40])])
+        self.writer.replace_memberships([self.snapshot([40])])
+        self.assertEqual(MsrCatchmentVillage.objects.count(), 1)
+        self.writer.replace_memberships([self.snapshot([])])
+        self.assertFalse(MsrCatchmentVillage.objects.exists())
+
+    def test_move_between_verified_catchments(self):
+        self.writer.replace_memberships([self.snapshot([40])])
+        self.writer.replace_memberships([self.snapshot([40], catchment_id=668), self.snapshot([])])
+        self.assertEqual(MsrCatchmentVillage.objects.get().catchment.msr_id, 668)
+
+    def test_failed_snapshot_preserves_previous_membership(self):
+        self.writer.replace_memberships([self.snapshot([40])])
+        with self.assertRaises(MsrLocationReference.DoesNotExist):
+            self.writer.replace_memberships([self.snapshot([999])])
+        self.assertEqual(MsrCatchmentVillage.objects.get().village.msr_id, 40)
+
+    def test_stale_publication_cannot_remove_membership(self):
+        self.writer.replace_memberships([self.snapshot([40])])
+        self.writer.push([catchment(revision=2)])
+        self.writer.replace_memberships([self.snapshot([])])
+        self.assertEqual(MsrCatchmentVillage.objects.count(), 1)
+
+    def test_conflicting_snapshot_rolls_back(self):
+        self.writer.replace_memberships([self.snapshot([40])])
+        with self.assertRaises(ValidationError):
+            self.writer.replace_memberships([self.snapshot([40]), self.snapshot([40], catchment_id=668)])
+        self.assertEqual(MsrCatchmentVillage.objects.get().catchment.msr_id, 667)

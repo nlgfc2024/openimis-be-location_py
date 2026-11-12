@@ -3,9 +3,10 @@ import math
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils.dateparse import parse_datetime
 
-from location.models import Location, MicroCatchment, MsrLocationReference
+from location.models import Location, MicroCatchment, MsrLocationReference, MsrCatchmentVillage
 
 
 PARENT_TYPES = {
@@ -101,6 +102,40 @@ class MsrReferenceWriter:
                 raise ValidationError("Import MSR administrative parents before their children.")
             pending = remaining
         return written
+
+    @transaction.atomic
+    def replace_memberships(self, snapshots):
+        """Replace only complete successful endpoint responses for named catchments."""
+        catchment_ids, village_ids, pairs = [], set(), []
+        for snapshot in snapshots:
+            revision = snapshot.get("revision")
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+                raise ValidationError("Membership snapshots require a nonnegative publication revision.")
+            catchment_id = _positive_id(snapshot.get("catchment_id"))
+            catchment = MsrLocationReference.objects.select_for_update().get(
+                source_instance=self.source_instance, msr_type="catchments", msr_id=catchment_id, is_micro=True,
+            )
+            if revision < catchment.revision:
+                continue  # An old publication retry cannot change its membership snapshot.
+            if catchment.pk in catchment_ids:
+                raise ValidationError("Duplicate MSR catchment membership snapshot.")
+            catchment_ids.append(catchment.pk)
+            if not isinstance(snapshot.get("village_ids"), list):
+                raise ValidationError("MSR membership snapshot requires a village ID array.")
+            for village_id in set(_positive_id(value) for value in snapshot["village_ids"]):
+                village = MsrLocationReference.objects.get(
+                    source_instance=self.source_instance, msr_type="villages", msr_id=village_id,
+                    district_msr_id=catchment.district_msr_id,
+                )
+                if village.pk in village_ids:
+                    raise ValidationError("MSR village belongs to multiple catchments in one snapshot.")
+                village_ids.add(village.pk)
+                pairs.append(MsrCatchmentVillage(catchment=catchment, village=village))
+        # Replacement and moves are atomic, including an authoritative empty response.
+        MsrCatchmentVillage.objects.filter(
+            Q(catchment_id__in=catchment_ids) | Q(village_id__in=village_ids),
+        ).delete()
+        MsrCatchmentVillage.objects.bulk_create(pairs)
 
     def _write(self, row):
         ref, created = MsrLocationReference.objects.select_for_update().get_or_create(
