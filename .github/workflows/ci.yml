@@ -16,4 +16,4 @@ on:
 jobs:
   call:
     name: Malawi CI
-    uses: nlgfc2024/openimis-be_py/.github/workflows/ci_module.yml@chore/ci-malawi-module-workflow
+    uses: nlgfc2024/openimis-be_py/.github/workflows/ci_module.yml@mw/develop
