@@ -1,5 +1,6 @@
 """Transactional v3 publication persistence, independent of legacy import writers."""
 import math
+import logging
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -171,6 +172,7 @@ class MsrReferenceWriter:
 
     def _match(self, ref):
         """Only attach an unambiguous active code within its verified parent scope."""
+        existing_micro = ref.micro_catchment if ref.micro_catchment_id else None
         ref.location = None
         ref.micro_catchment = None
         if ref.msr_type in LOCATION_TYPES:
@@ -195,6 +197,11 @@ class MsrReferenceWriter:
             district = MsrLocationReference.objects.get(
                 source_instance=self.source_instance, msr_type="districts", msr_id=ref.district_msr_id,
             )
+            if existing_micro:
+                if existing_micro.validity_to is not None or existing_micro.district_id != district.location_id:
+                    raise ValidationError("The existing MSR micro-catchment link requires review after its district or target changed.")
+                ref.micro_catchment = existing_micro
+                return
             if district.location_id:
                 matches = list(MicroCatchment.objects.filter(
                     code=ref.code, district_id=district.location_id, validity_to__isnull=True,
@@ -202,3 +209,28 @@ class MsrReferenceWriter:
                 if len(matches) > 1:
                     raise ValidationError("Ambiguous active CoreMIS micro-catchment code.")
                 ref.micro_catchment = matches[0] if matches else None
+
+
+@transaction.atomic
+def bind_msr_micro_catchment(reference_id, target_uuid, user):
+    """Explicitly review a link when MSR and CoreMIS use different code systems."""
+    from location.apps import LocationConfig
+    from django.core.exceptions import PermissionDenied
+    if (user.is_anonymous or not user.has_perms(LocationConfig.gql_mutation_edit_micro_catchments_perms)
+            or not user.has_perms(LocationConfig.gql_query_locations_perms)):
+        raise PermissionDenied("Micro-catchment edit and location-view permissions are required")
+    target = MicroCatchment.get_queryset(None, user).get(uuid=target_uuid, validity_to__isnull=True)
+    ref = MsrLocationReference.objects.select_for_update().get(pk=reference_id, msr_type="catchments", is_micro=True)
+    district = MsrLocationReference.objects.get(source_instance=ref.source_instance,
+                                               msr_type="districts", msr_id=ref.district_msr_id)
+    if district.location_id != target.district_id:
+        raise ValidationError("Reviewed target must belong to the matched MSR district")
+    if ref.micro_catchment_id and ref.micro_catchment_id != target.pk:
+        raise ValidationError("An existing target must be reviewed separately before reassignment")
+    if MsrLocationReference.objects.filter(source_instance=ref.source_instance, micro_catchment=target).exclude(pk=ref.pk).exists():
+        raise ValidationError("This CoreMIS micro-catchment is already linked in the MSR instance")
+    ref.micro_catchment = target
+    ref.full_clean()
+    ref.save()
+    logging.getLogger(__name__).info("Reviewed MSR link: actor=%s reference=%s target=%s", user.pk, ref.pk, target.uuid)
+    return ref

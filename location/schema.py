@@ -57,9 +57,10 @@ from django.conf import settings
 
 
 from location.clusters import ClusterQuery, SaveClusterMutation, DeleteClusterMutation
+from location.geospatial import GeospatialQuery
 
 
-class Query(ClusterQuery, graphene.ObjectType):
+class Query(GeospatialQuery, ClusterQuery, graphene.ObjectType):
     zones = OrderedDjangoFilterConnectionField(
         ZoneGQLType,
         search=graphene.String(),
