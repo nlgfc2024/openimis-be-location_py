@@ -1209,3 +1209,46 @@ class ZoneVillage(core_models.VersionedModel):
     class Meta:
         managed = True
         db_table = "tblZoneVillages"
+
+
+class GeographicFeature(models.Model):
+    """Accepted local geography, independent of any upstream provider/API."""
+    id = models.AutoField(primary_key=True)
+    source_instance = models.CharField(max_length=100)
+    external_type = models.CharField(max_length=80)
+    external_id = models.CharField(max_length=100)
+    kind = models.CharField(max_length=80)
+    name = models.CharField(max_length=255)
+    code = models.CharField(max_length=100)
+    district = models.ForeignKey(Location, models.DO_NOTHING, null=True, blank=True, related_name='+')
+    location = models.ForeignKey(Location, models.DO_NOTHING, null=True, blank=True, related_name='+')
+    micro_catchment = models.ForeignKey(MicroCatchment, models.DO_NOTHING, null=True, blank=True, related_name='+')
+    parent_keys = models.JSONField(default=list)
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    point_status = models.CharField(max_length=80, null=True, blank=True)
+    observed_revision = models.PositiveBigIntegerField(default=0)
+    geometry_revision = models.PositiveBigIntegerField(null=True, blank=True)
+    geometry = models.JSONField(null=True, blank=True)
+    geometry_hash = models.CharField(max_length=64, null=True, blank=True)
+    geometry_relation = models.CharField(max_length=80, null=True, blank=True)
+    geometry_source = models.CharField(max_length=255, null=True, blank=True)
+    publication_status = models.CharField(max_length=80, default='unavailable')
+    refresh_status = models.CharField(max_length=80, default='not_downloaded')
+    synced_at = models.DateTimeField(null=True, blank=True)
+    geometry_updated_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'location_geographic_feature'
+        constraints = [models.UniqueConstraint(fields=['source_instance','external_type','external_id'], name='location_geo_external_unique')]
+
+
+class GeographicMembership(models.Model):
+    """Imported coverage relationships; never inferred from geometry."""
+    id = models.AutoField(primary_key=True)
+    parent = models.ForeignKey(GeographicFeature, models.CASCADE, related_name='coverage_memberships')
+    child = models.OneToOneField(GeographicFeature, models.CASCADE, related_name='coverage_membership')
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'location_geographic_membership'

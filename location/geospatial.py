@@ -89,5 +89,5 @@ class GeospatialQuery(graphene.ObjectType):
         reference = permitted_references(info.context.user).filter(pk=reference_id).first()
         if reference is None:
             raise PermissionDenied("Reference is unavailable")
-        from msr_etl.geometry_access import load_geometry
-        return GeoGeometryType(**load_geometry(reference))
+        from location.geography import legacy_geometry
+        return GeoGeometryType(**legacy_geometry(reference))
